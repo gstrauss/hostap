@@ -91,6 +91,8 @@ def check_ocsp_support(dev):
     #    raise HwsimSkip("OCSP not supported with this TLS library: " + tls)
     #if tls.startswith("wolfSSL"):
     #    raise HwsimSkip("OCSP not supported with this TLS library: " + tls)
+    if tls.startswith("mbed TLS"):
+        raise HwsimSkip("OCSP not supported with this TLS library: " + tls)
 
 def check_pkcs5_v15_support(dev):
     tls = dev.request("GET tls_library")
@@ -99,6 +101,8 @@ def check_pkcs5_v15_support(dev):
 
 def check_tls13_support(dev):
     tls = dev.request("GET tls_library")
+    if tls.startswith("mbed TLS"):
+        raise HwsimSkip("TLS v1.3 not supported")
     if "run=OpenSSL 1.1.1" not in tls and "run=OpenSSL 3.0" not in tls and "wolfSSL" not in tls:
         raise HwsimSkip("TLS v1.3 not supported")
 
@@ -4774,7 +4778,7 @@ def test_ap_wpa2_eap_tls_intermediate_ca(dev, apdev, params):
     params["private_key"] = "auth_serv/iCA-server/server.key"
     hostapd.add_ap(apdev[0], params)
     tls = dev[0].request("GET tls_library")
-    if "GnuTLS" in tls or "wolfSSL" in tls:
+    if "GnuTLS" in tls or "wolfSSL" in tls or "mbed TLS" in tls:
         ca_cert = "auth_serv/iCA-user/ca-and-root.pem"
         client_cert = "auth_serv/iCA-user/user_and_ica.pem"
     else:
@@ -4840,6 +4844,7 @@ def test_ap_wpa2_eap_tls_intermediate_ca_ocsp_sha1(dev, apdev, params):
     run_ap_wpa2_eap_tls_intermediate_ca_ocsp(dev, apdev, params, "-sha1")
 
 def run_ap_wpa2_eap_tls_intermediate_ca_ocsp(dev, apdev, params, md):
+    check_ocsp_support(dev[0])
     params = int_eap_server_params()
     params["ca_cert"] = "auth_serv/iCA-server/ca-and-root.pem"
     params["server_cert"] = "auth_serv/iCA-server/server.pem"
@@ -4849,7 +4854,7 @@ def run_ap_wpa2_eap_tls_intermediate_ca_ocsp(dev, apdev, params, md):
     try:
         hostapd.add_ap(apdev[0], params)
         tls = dev[0].request("GET tls_library")
-        if "GnuTLS" in tls or "wolfSSL" in tls:
+        if "GnuTLS" in tls or "wolfSSL" in tls or "mbed TLS" in tls:
             ca_cert = "auth_serv/iCA-user/ca-and-root.pem"
             client_cert = "auth_serv/iCA-user/user_and_ica.pem"
         else:
@@ -6081,13 +6086,17 @@ def test_ap_wpa2_eap_tls_versions(dev, apdev):
             check_tls_ver(dev[0], hapd,
                           "tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1",
                           "TLSv1.2")
-    elif tls.startswith("internal"):
+    elif tls.startswith("internal") or tls.startswith("mbed TLS"):
         check_tls_ver(dev[0], hapd,
                       "tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1", "TLSv1.2")
-    check_tls_ver(dev[1], hapd,
-                  "tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=0 tls_disable_tlsv1_2=1", "TLSv1.1")
-    check_tls_ver(dev[2], hapd,
-                  "tls_disable_tlsv1_0=0 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1", "TLSv1")
+    if tls.startswith("mbed TLS"):
+        check_tls_ver(dev[2], hapd,
+                      "tls_disable_tlsv1_0=0 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1", "TLSv1.0")
+    else:
+        check_tls_ver(dev[1], hapd,
+                      "tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=0 tls_disable_tlsv1_2=1", "TLSv1.1")
+        check_tls_ver(dev[2], hapd,
+                      "tls_disable_tlsv1_0=0 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1", "TLSv1")
     if "run=OpenSSL 1.1.1" in tls or "run=OpenSSL 3.0" in tls:
         check_tls_ver(dev[0], hapd,
                       "tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0", "TLSv1.3")
@@ -6109,6 +6118,11 @@ def test_ap_wpa2_eap_tls_versions_server(dev, apdev):
     tests = [("TLSv1", "[ENABLE-TLSv1.0][DISABLE-TLSv1.1][DISABLE-TLSv1.2][DISABLE-TLSv1.3]"),
              ("TLSv1.1", "[ENABLE-TLSv1.0][ENABLE-TLSv1.1][DISABLE-TLSv1.2][DISABLE-TLSv1.3]"),
              ("TLSv1.2", "[ENABLE-TLSv1.0][ENABLE-TLSv1.1][ENABLE-TLSv1.2][DISABLE-TLSv1.3]")]
+    tls = dev[0].request("GET tls_library")
+    if tls.startswith("mbed TLS"):
+        tests = [#("TLSv1.0", "[ENABLE-TLSv1.0][DISABLE-TLSv1.1][DISABLE-TLSv1.2][DISABLE-TLSv1.3]"),
+                 #("TLSv1.1", "[ENABLE-TLSv1.0][ENABLE-TLSv1.1][DISABLE-TLSv1.2][DISABLE-TLSv1.3]"),
+                 ("TLSv1.2", "[ENABLE-TLSv1.0][ENABLE-TLSv1.1][ENABLE-TLSv1.2][DISABLE-TLSv1.3]")]
     for exp, flags in tests:
         hapd.disable()
         hapd.set("tls_flags", flags)

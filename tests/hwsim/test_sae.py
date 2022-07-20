@@ -177,6 +177,11 @@ def test_sae_groups(dev, apdev):
     if tls.startswith("OpenSSL") and "run=OpenSSL 1." in tls:
         logger.info("Add Brainpool EC groups since OpenSSL is new enough")
         sae_groups += [27, 28, 29, 30]
+    if tls.startswith("mbed TLS"):
+        # secp224k1 and secp224r1 (26) have prime p = 1 mod 4, and
+        # mbedtls does not have code to derive y from compressed format.
+        sae_groups = [19, 25, 20, 21, 1, 2, 5, 14, 15, 16, 22, 23, 24]
+        sae_groups += [27, 28, 29, 30]
     heavy_groups = [14, 15, 16]
     suitable_groups = [15, 16, 17, 18, 19, 20, 21]
     groups = [str(g) for g in sae_groups]

@@ -26,6 +26,8 @@ def check_suite_b_tls_lib(dev, dhe=False, level128=False):
         return
     if tls.startswith("wolfSSL"):
         return
+    if tls.startswith("mbed TLS"):
+        return
     if not tls.startswith("OpenSSL"):
         raise HwsimSkip("TLS library not supported for Suite B: " + tls)
     supported = False
