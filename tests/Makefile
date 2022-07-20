@@ -1,9 +1,12 @@
-ALL=test-base64 test-md4 test-milenage \
+RUN_TESTS= \
+	test-list \
+	test-md4 test-rc4 \
+	test-sha1 test-sha256 \
+	test-milenage test-aes test-bss \
 	test-rsa-sig-ver \
-	test-sha1 \
-	test-https test-https_server \
-	test-sha256 test-aes test-x509v3 test-list test-rc4 \
-	test-bss
+	test-crypto_module
+
+ALL=$(RUN_TESTS) test-base64 test-https test-https_server test-rc4 test-x509v3
 
 include ../src/build.rules
 
@@ -25,13 +28,27 @@ CFLAGS += -DCONFIG_IEEE80211R_AP
 CFLAGS += -DCONFIG_IEEE80211R
 CFLAGS += -DCONFIG_TDLS
 
+# test-crypto_module
+CFLAGS += -DCONFIG_MODULE_TESTS
+CFLAGS += -DCONFIG_DPP
+#CFLAGS += -DCONFIG_DPP2
+#CFLAGS += -DCONFIG_DPP3
+CFLAGS += -DCONFIG_ECC
+CFLAGS += -DCONFIG_HMAC_SHA256_KDF
+CFLAGS += -DCONFIG_HMAC_SHA384_KDF
+CFLAGS += -DCONFIG_MESH
+CFLAGS += -DCONFIG_SHA256
+CFLAGS += -DCONFIG_SHA384
+CFLAGS += -DEAP_PSK
+CFLAGS += -DEAP_FAST
+
 CFLAGS += -I../src
 CFLAGS += -I../src/utils
 
 SLIBS = ../src/utils/libutils.a
 
-DLIBS = ../src/crypto/libcrypto.a \
-	../src/tls/libtls.a
+DLIBS = ../src/tls/libtls.a \
+	../src/crypto/libcrypto.a
 
 _OBJS_VAR := LLIBS
 include ../src/objs.mk
@@ -43,6 +60,34 @@ include ../src/objs.mk
 LIBS = $(SLIBS) $(DLIBS)
 LLIBS = -Wl,--start-group $(DLIBS) -Wl,--end-group $(SLIBS)
 
+ifeq ($(CONFIG_TLS),mbedtls)
+CFLAGS += -DCONFIG_TLS_MBEDTLS
+LLIBS += -lmbedtls -lmbedx509 -lmbedcrypto
+else
+ifeq ($(CONFIG_TLS),openssl)
+CFLAGS += -DCONFIG_TLS_OPENSSL
+LLIBS += -lssl -lcrypto
+else
+ifeq ($(CONFIG_TLS),gnutls)
+CFLAGS += -DCONFIG_TLS_GNUTLS
+LLIBS += -lgnutls -lgpg-error -lgcrypt
+else
+ifeq ($(CONFIG_TLS),wolfssl)
+CFLAGS += -DCONFIG_TLS_WOLFSSL
+LLIBS += -lwolfssl -lm
+else
+CFLAGS += -DCONFIG_TLS_INTERNAL
+CFLAGS += -DCONFIG_TLS_INTERNAL_SERVER
+ALL += test-rsa-sig-ver
+ALL += test-x509v3
+clean-config_tls_internal:
+	rm -f test_x509v3_nist.out.*
+	rm -f test_x509v3_nist2.out.*
+endif
+endif
+endif
+endif
+
 # glibc < 2.17 needs -lrt for clock_gettime()
 LLIBS += -lrt
 
@@ -50,6 +95,9 @@ TEST=test-aes
 include test.mk
 
 TEST=test-base64
+include test.mk
+
+TEST=test-crypto_module
 include test.mk
 
 TEST=test-https
@@ -143,18 +191,11 @@ OBJS_test-bss=$(WPA_OBJS)
 include test.mk
 
 run-tests: $(ALL)
-	./test-aes
-	./test-list
-	./test-md4
-	./test-milenage
-	./test-rsa-sig-ver
-	./test-sha1
-	./test-sha256
-	./test-bss
+	@set -ex; for i in $(RUN_TESTS); do ./$$i; done
 	@echo
 	@echo All tests completed successfully.
 
-clean: common-clean
+clean: common-clean clean-config_tls_internal
 	rm -f *~
-	rm -f test_x509v3_nist.out.*
-	rm -f test_x509v3_nist2.out.*
+
+.PHONY: run-tests clean-config_tls_internal
