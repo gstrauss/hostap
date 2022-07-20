@@ -771,10 +771,6 @@ endif
 OBJS += ../src/crypto/crypto_$(CONFIG_CRYPTO).o
 HOBJS += ../src/crypto/crypto_$(CONFIG_CRYPTO).o
 SOBJS += ../src/crypto/crypto_$(CONFIG_CRYPTO).o
-ifdef NEED_FIPS186_2_PRF
-OBJS += ../src/crypto/fips_prf_internal.o
-SHA1OBJS += ../src/crypto/sha1-internal.o
-endif
 ifeq ($(CONFIG_CRYPTO), mbedtls)
 ifdef CONFIG_DPP
 LIBS += -lmbedx509
