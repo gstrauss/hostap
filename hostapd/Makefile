@@ -708,6 +708,7 @@ CFLAGS += -DCONFIG_TLSV12
 endif
 
 ifeq ($(CONFIG_TLS), wolfssl)
+CFLAGS += -DCONFIG_TLS_WOLFSSL
 CONFIG_CRYPTO=wolfssl
 ifdef TLS_FUNCS
 OBJS += ../src/crypto/tls_wolfssl.o
@@ -728,6 +729,7 @@ endif
 endif
 
 ifeq ($(CONFIG_TLS), openssl)
+CFLAGS += -DCONFIG_TLS_OPENSSL
 CFLAGS += -DCRYPTO_RSA_OAEP_SHA256
 CONFIG_CRYPTO=openssl
 ifdef TLS_FUNCS
@@ -758,6 +760,7 @@ CFLAGS += -DTLS_DEFAULT_CIPHERS=\"$(CONFIG_TLS_DEFAULT_CIPHERS)\"
 endif
 
 ifeq ($(CONFIG_TLS), mbedtls)
+CFLAGS += -DCONFIG_TLS_MBEDTLS
 ifndef CONFIG_CRYPTO
 CONFIG_CRYPTO=mbedtls
 endif
@@ -788,6 +791,7 @@ endif
 endif
 
 ifeq ($(CONFIG_TLS), gnutls)
+CFLAGS += -DCONFIG_TLS_GNUTLS
 ifndef CONFIG_CRYPTO
 # default to libgcrypt
 CONFIG_CRYPTO=gnutls
@@ -818,6 +822,7 @@ endif
 endif
 
 ifeq ($(CONFIG_TLS), internal)
+CFLAGS += -DCONFIG_TLS_INTERNAL
 ifndef CONFIG_CRYPTO
 CONFIG_CRYPTO=internal
 endif
@@ -896,6 +901,7 @@ endif
 endif
 
 ifeq ($(CONFIG_TLS), linux)
+CFLAGS += -DCONFIG_TLS_INTERNAL
 OBJS += ../src/crypto/crypto_linux.o
 ifdef TLS_FUNCS
 OBJS += ../src/crypto/crypto_internal-rsa.o
