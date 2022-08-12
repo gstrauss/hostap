@@ -248,6 +248,12 @@ struct crypto_ec_key * dpp_set_pubkey_point(struct crypto_ec_key *group_key,
 
 struct crypto_ec_key * dpp_gen_keypair(const struct dpp_curve_params *curve)
 {
+	if (curve == NULL) {
+		wpa_printf(MSG_DEBUG,
+		           "DPP: %s curve must be initialized", __func__);
+		return NULL;
+	}
+
 	struct crypto_ec_key *key;
 
 	wpa_printf(MSG_DEBUG, "DPP: Generating a keypair");
