@@ -1588,7 +1588,9 @@ dpp_pkex_derive_Qr(const struct dpp_curve_params *curve, const u8 *mac_resp,
 	Pr = crypto_ec_key_get_public_key(Pr_key);
 	Qr = crypto_ec_point_init(ec);
 	hash_bn = crypto_bignum_init_set(hash, curve->hash_len);
-	if (!Pr || !Qr || !hash_bn || crypto_ec_point_mul(ec, Pr, hash_bn, Qr))
+	if (!Pr || !Qr || !hash_bn ||
+	    crypto_bignum_mod(hash_bn, crypto_ec_get_prime(ec), hash_bn) ||
+	    crypto_ec_point_mul(ec, Pr, hash_bn, Qr))
 		goto fail;
 
 	if (crypto_ec_point_is_at_infinity(ec, Qr)) {
