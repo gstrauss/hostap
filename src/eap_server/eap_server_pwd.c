@@ -314,11 +314,6 @@ fin:
 static void eap_pwd_build_confirm_req(struct eap_sm *sm,
 				      struct eap_pwd_data *data, u8 id)
 {
-	struct crypto_hash *hash = NULL;
-	u8 conf[SHA256_MAC_LEN], *cruft = NULL, *ptr;
-	u16 grp;
-	size_t prime_len, order_len;
-
 	wpa_printf(MSG_DEBUG, "EAP-pwd: Confirm/Request");
 	/*
 	 * if we're fragmenting then we already have an confirm request, just
@@ -327,96 +322,26 @@ static void eap_pwd_build_confirm_req(struct eap_sm *sm,
 	if (data->out_frag_pos)
 		return;
 
-	prime_len = crypto_ec_prime_len(data->grp->group);
-	order_len = crypto_ec_order_len(data->grp->group);
-
-	/* Each component of the cruft will be at most as big as the prime */
-	cruft = os_malloc(prime_len * 2);
-	if (!cruft) {
-		wpa_printf(MSG_INFO, "EAP-PWD (server): debug allocation "
-			   "fail");
-		goto fin;
-	}
-
 	/*
 	 * commit is H(k | server_element | server_scalar | peer_element |
 	 *	       peer_scalar | ciphersuite)
 	 */
-	hash = eap_pwd_h_init();
-	if (hash == NULL)
-		goto fin;
-
-	/*
-	 * Zero the memory each time because this is mod prime math and some
-	 * value may start with a few zeros and the previous one did not.
-	 *
-	 * First is k
-	 */
-	if (crypto_bignum_to_bin(data->k, cruft, prime_len, prime_len) < 0)
-		goto fin;
-
-	eap_pwd_h_update(hash, cruft, prime_len);
-
-	/* server element: x, y */
-	if (crypto_ec_point_to_bin(data->grp->group, data->my_element, cruft,
-				   cruft + prime_len) < 0) {
-		wpa_printf(MSG_INFO, "EAP-PWD (server): confirm point "
-			   "assignment fail");
+	if (compute_confirm(data->grp->group, data->k,
+			    data->my_element, data->my_scalar,
+			    data->peer_element, data->peer_scalar,
+			    data->group_num, data->my_confirm) != 0) {
 		goto fin;
 	}
-	eap_pwd_h_update(hash, cruft, prime_len * 2);
-
-	/* server scalar */
-	if (crypto_bignum_to_bin(data->my_scalar, cruft, order_len,
-				 order_len) < 0)
-		goto fin;
-
-	eap_pwd_h_update(hash, cruft, order_len);
-
-	/* peer element: x, y */
-	if (crypto_ec_point_to_bin(data->grp->group, data->peer_element, cruft,
-				   cruft + prime_len) < 0) {
-		wpa_printf(MSG_INFO, "EAP-PWD (server): confirm point "
-			   "assignment fail");
-		goto fin;
-	}
-	eap_pwd_h_update(hash, cruft, prime_len * 2);
-
-	/* peer scalar */
-	if (crypto_bignum_to_bin(data->peer_scalar, cruft, order_len,
-				 order_len) < 0)
-		goto fin;
-
-	eap_pwd_h_update(hash, cruft, order_len);
-
-	/* ciphersuite */
-	grp = htons(data->group_num);
-	os_memset(cruft, 0, prime_len);
-	ptr = cruft;
-	os_memcpy(ptr, &grp, sizeof(u16));
-	ptr += sizeof(u16);
-	*ptr = EAP_PWD_DEFAULT_RAND_FUNC;
-	ptr += sizeof(u8);
-	*ptr = EAP_PWD_DEFAULT_PRF;
-	ptr += sizeof(u8);
-	eap_pwd_h_update(hash, cruft, ptr - cruft);
-
-	/* all done with the random function */
-	eap_pwd_h_final(hash, conf);
-	hash = NULL;
-	os_memcpy(data->my_confirm, conf, SHA256_MAC_LEN);
 
 	data->outbuf = wpabuf_alloc(SHA256_MAC_LEN);
 	if (data->outbuf == NULL)
 		goto fin;
 
-	wpabuf_put_data(data->outbuf, conf, SHA256_MAC_LEN);
+	wpabuf_put_data(data->outbuf, data->my_confirm, SHA256_MAC_LEN);
 
 fin:
-	bin_clear_free(cruft, prime_len * 2);
 	if (data->outbuf == NULL)
 		eap_pwd_state(data, FAILURE);
-	eap_pwd_h_final(hash, NULL);
 }
 
 
@@ -755,20 +680,15 @@ static void
 eap_pwd_process_confirm_resp(struct eap_sm *sm, struct eap_pwd_data *data,
 			     const u8 *payload, size_t payload_len)
 {
-	struct crypto_hash *hash = NULL;
 	u32 cs;
 	u16 grp;
-	u8 conf[SHA256_MAC_LEN], *cruft = NULL, *ptr;
-	size_t prime_len, order_len;
-
-	prime_len = crypto_ec_prime_len(data->grp->group);
-	order_len = crypto_ec_order_len(data->grp->group);
+	u8 conf[SHA256_MAC_LEN], *ptr;
 
 	if (payload_len != SHA256_MAC_LEN) {
 		wpa_printf(MSG_INFO,
 			   "EAP-pwd: Unexpected Confirm payload length %u (expected %u)",
 			   (unsigned int) payload_len, SHA256_MAC_LEN);
-		goto fin;
+		return;
 	}
 
 	/* build up the ciphersuite: group | random_function | prf */
@@ -780,71 +700,21 @@ eap_pwd_process_confirm_resp(struct eap_sm *sm, struct eap_pwd_data *data,
 	ptr += sizeof(u8);
 	*ptr = EAP_PWD_DEFAULT_PRF;
 
-	/* each component of the cruft will be at most as big as the prime */
-	cruft = os_malloc(prime_len * 2);
-	if (!cruft) {
-		wpa_printf(MSG_INFO, "EAP-PWD (peer): allocation fail");
-		goto fin;
-	}
-
 	/*
 	 * commit is H(k | peer_element | peer_scalar | server_element |
 	 *	       server_scalar | ciphersuite)
 	 */
-	hash = eap_pwd_h_init();
-	if (hash == NULL)
-		goto fin;
-
-	/* k */
-	if (crypto_bignum_to_bin(data->k, cruft, prime_len, prime_len) < 0)
-		goto fin;
-
-	eap_pwd_h_update(hash, cruft, prime_len);
-
-	/* peer element: x, y */
-	if (crypto_ec_point_to_bin(data->grp->group, data->peer_element, cruft,
-				   cruft + prime_len) < 0) {
-		wpa_printf(MSG_INFO, "EAP-PWD (server): confirm point "
-			   "assignment fail");
-		goto fin;
+	if (compute_confirm(data->grp->group, data->k,
+			    data->peer_element, data->peer_scalar,
+			    data->my_element, data->my_scalar,
+			    data->group_num, conf) != 0) {
+		return;
 	}
-	eap_pwd_h_update(hash, cruft, prime_len * 2);
 
-	/* peer scalar */
-	if (crypto_bignum_to_bin(data->peer_scalar, cruft, order_len,
-				 order_len) < 0)
-		goto fin;
-
-	eap_pwd_h_update(hash, cruft, order_len);
-
-	/* server element: x, y */
-	if (crypto_ec_point_to_bin(data->grp->group, data->my_element, cruft,
-				   cruft + prime_len) < 0) {
-		wpa_printf(MSG_INFO, "EAP-PWD (server): confirm point "
-			   "assignment fail");
-		goto fin;
-	}
-	eap_pwd_h_update(hash, cruft, prime_len * 2);
-
-	/* server scalar */
-	if (crypto_bignum_to_bin(data->my_scalar, cruft, order_len,
-				 order_len) < 0)
-		goto fin;
-
-	eap_pwd_h_update(hash, cruft, order_len);
-
-	/* ciphersuite */
-	eap_pwd_h_update(hash, (u8 *) &cs, sizeof(u32));
-
-	/* all done */
-	eap_pwd_h_final(hash, conf);
-	hash = NULL;
-
-	ptr = (u8 *) payload;
-	if (os_memcmp_const(conf, ptr, SHA256_MAC_LEN)) {
+	if (os_memcmp_const(conf, payload, SHA256_MAC_LEN)) {
 		wpa_printf(MSG_INFO, "EAP-PWD (server): confirm did not "
 			   "verify");
-		goto fin;
+		return;
 	}
 
 	wpa_printf(MSG_DEBUG, "EAP-pwd (server): confirm verified");
@@ -855,10 +725,6 @@ eap_pwd_process_confirm_resp(struct eap_sm *sm, struct eap_pwd_data *data,
 		eap_pwd_state(data, FAILURE);
 	else
 		eap_pwd_state(data, SUCCESS);
-
-fin:
-	bin_clear_free(cruft, prime_len * 2);
-	eap_pwd_h_final(hash, NULL);
 }
 
 

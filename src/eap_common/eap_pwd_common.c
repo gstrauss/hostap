@@ -19,25 +19,11 @@
 
 
 /* The random function H(x) = HMAC-SHA256(0^32, x) */
-struct crypto_hash * eap_pwd_h_init(void)
+static int eap_pwd_hmac_sha256_vector(size_t num_elem, const u8 *addr[],
+				      const size_t *len, u8 *mac)
 {
-	u8 allzero[SHA256_MAC_LEN];
-	os_memset(allzero, 0, SHA256_MAC_LEN);
-	return crypto_hash_init(CRYPTO_HASH_ALG_HMAC_SHA256, allzero,
-				SHA256_MAC_LEN);
-}
-
-
-void eap_pwd_h_update(struct crypto_hash *hash, const u8 *data, size_t len)
-{
-	crypto_hash_update(hash, data, len);
-}
-
-
-void eap_pwd_h_final(struct crypto_hash *hash, u8 *digest)
-{
-	size_t len = SHA256_MAC_LEN;
-	crypto_hash_finish(hash, digest, &len);
+	static u8 zeroes[SHA256_MAC_LEN];
+	return hmac_sha256_vector(zeroes, sizeof(zeroes), num_elem, addr, len, mac);
 }
 
 
@@ -45,42 +31,34 @@ void eap_pwd_h_final(struct crypto_hash *hash, u8 *digest)
 static int eap_pwd_kdf(const u8 *key, size_t keylen, const u8 *label,
 		       size_t labellen, u8 *result, size_t resultbitlen)
 {
-	struct crypto_hash *hash;
-	u8 digest[SHA256_MAC_LEN];
 	u16 i, ctr, L;
-	size_t resultbytelen, len = 0, mdlen;
+	size_t bytes = (resultbitlen + 7) / 8;
+	const u8 *addr[4] = { result,   (u8 *) &i,    label, (u8 *) &L   };
+	size_t lens[4] =    {      0, sizeof(u16), labellen, sizeof(u16) };
 
-	resultbytelen = (resultbitlen + 7) / 8;
-	ctr = 0;
-	L = htons(resultbitlen);
-	while (len < resultbytelen) {
-		ctr++;
-		i = htons(ctr);
-		hash = crypto_hash_init(CRYPTO_HASH_ALG_HMAC_SHA256,
-					key, keylen);
-		if (hash == NULL)
+	WPA_PUT_BE16((u8 *)&L, resultbitlen);
+	for (ctr = 1; bytes >= SHA256_MAC_LEN; bytes -= SHA256_MAC_LEN, ++ctr) {
+		WPA_PUT_BE16((u8 *)&i, ctr);
+		if (hmac_sha256_vector(key, keylen, 4, addr, lens, result))
 			return -1;
-		if (ctr > 1)
-			crypto_hash_update(hash, digest, SHA256_MAC_LEN);
-		crypto_hash_update(hash, (u8 *) &i, sizeof(u16));
-		crypto_hash_update(hash, label, labellen);
-		crypto_hash_update(hash, (u8 *) &L, sizeof(u16));
-		mdlen = SHA256_MAC_LEN;
-		if (crypto_hash_finish(hash, digest, &mdlen) < 0)
+		addr[0] = result;
+		result += SHA256_MAC_LEN;
+		lens[0] = SHA256_MAC_LEN; /*(include in subsequent rounds)*/
+	}
+
+	if (bytes) {
+		u8 digest[SHA256_MAC_LEN];
+		WPA_PUT_BE16((u8 *)&i, ctr);
+		if (hmac_sha256_vector(key, keylen, 4, addr, lens, digest))
 			return -1;
-		if ((len + mdlen) > resultbytelen)
-			os_memcpy(result + len, digest, resultbytelen - len);
-		else
-			os_memcpy(result + len, digest, mdlen);
-		len += mdlen;
+		os_memcpy(result, digest, bytes);
+		result += bytes;
+		forced_memzero(digest, sizeof(digest));
 	}
 
 	/* since we're expanding to a bit length, mask off the excess */
-	if (resultbitlen % 8) {
-		u8 mask = 0xff;
-		mask <<= (8 - (resultbitlen % 8));
-		result[resultbytelen - 1] &= mask;
-	}
+	if ((resultbitlen &= 0x7))
+		result[-1] &= (u8)(0xff << (8 - resultbitlen));
 
 	return 0;
 }
@@ -129,7 +107,6 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 	u8 prime_bin[MAX_ECC_PRIME_LEN];
 	u8 x_y[2 * MAX_ECC_PRIME_LEN];
 	struct crypto_bignum *tmp2 = NULL, *y = NULL;
-	struct crypto_hash *hash;
 	unsigned char pwe_digest[SHA256_MAC_LEN], *prfbuf = NULL, ctr;
 	int ret = 0, res;
 	u8 found = 0; /* 0 (false) or 0xff (true) to be used as const_time_*
@@ -141,6 +118,9 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 	int cmp_prime;
 	unsigned int in_range;
 	unsigned int is_eq;
+	const u8 *addr[5] = { token, id_peer, id_server, password, &ctr };
+	size_t lens[5] = { sizeof(u32), id_peer_len, id_server_len,
+	                   password_len, sizeof(ctr) };
 
 	if (grp->pwe)
 		return -1;
@@ -184,15 +164,8 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 		 *    pwd-seed = H(token | peer-id | server-id | password |
 		 *		   counter)
 		 */
-		hash = eap_pwd_h_init();
-		if (hash == NULL)
+		if (eap_pwd_hmac_sha256_vector(5, addr, lens, pwe_digest))
 			goto fail;
-		eap_pwd_h_update(hash, token, sizeof(u32));
-		eap_pwd_h_update(hash, id_peer, id_peer_len);
-		eap_pwd_h_update(hash, id_server, id_server_len);
-		eap_pwd_h_update(hash, password, password_len);
-		eap_pwd_h_update(hash, &ctr, sizeof(ctr));
-		eap_pwd_h_final(hash, pwe_digest);
 
 		is_odd = const_time_select_u8(
 			found, is_odd, pwe_digest[SHA256_MAC_LEN - 1] & 0x01);
@@ -333,62 +306,48 @@ int compute_keys(EAP_PWD_group *grp, const struct crypto_bignum *k,
 		 const u8 *confirm_peer, const u8 *confirm_server,
 		 const u32 *ciphersuite, u8 *msk, u8 *emsk, u8 *session_id)
 {
-	struct crypto_hash *hash;
 	u8 mk[SHA256_MAC_LEN], *cruft;
 	u8 msk_emsk[EAP_MSK_LEN + EAP_EMSK_LEN];
 	size_t prime_len, order_len;
+	const u8 *addr[3] = { (u8 *) ciphersuite, NULL, NULL };
+	size_t lens[3] = { sizeof(u32), 0, 0 };
 
 	prime_len = crypto_ec_prime_len(grp->group);
 	order_len = crypto_ec_order_len(grp->group);
 
-	cruft = os_malloc(prime_len);
+	cruft = os_malloc(prime_len*2);
 	if (!cruft)
 		return -1;
+	addr[1] = cruft;
+	addr[2] = cruft+prime_len;
+	lens[1] = order_len;
+	lens[2] = order_len;
 
 	/*
 	 * first compute the session-id = TypeCode | H(ciphersuite | scal_p |
 	 *	scal_s)
 	 */
 	session_id[0] = EAP_TYPE_PWD;
-	hash = eap_pwd_h_init();
-	if (hash == NULL) {
+	crypto_bignum_to_bin(peer_scalar, cruft, order_len, order_len);
+	crypto_bignum_to_bin(server_scalar, cruft+prime_len, order_len, order_len);
+	if (eap_pwd_hmac_sha256_vector(3, addr, lens, &session_id[1])) {
 		os_free(cruft);
 		return -1;
 	}
-	eap_pwd_h_update(hash, (const u8 *) ciphersuite, sizeof(u32));
-	if (crypto_bignum_to_bin(peer_scalar, cruft, order_len,
-				 order_len) < 0) {
-		os_free(cruft);
-		return -1;
-	}
-
-	eap_pwd_h_update(hash, cruft, order_len);
-	if (crypto_bignum_to_bin(server_scalar, cruft, order_len,
-				 order_len) < 0) {
-		os_free(cruft);
-		return -1;
-	}
-
-	eap_pwd_h_update(hash, cruft, order_len);
-	eap_pwd_h_final(hash, &session_id[1]);
 
 	/* then compute MK = H(k | confirm-peer | confirm-server) */
-	hash = eap_pwd_h_init();
-	if (hash == NULL) {
+	addr[0] = cruft;
+	addr[1] = confirm_peer;
+	addr[2] = confirm_server;
+	lens[0] = prime_len;
+	lens[1] = SHA256_MAC_LEN;
+	lens[2] = SHA256_MAC_LEN;
+	crypto_bignum_to_bin(k, cruft, prime_len, prime_len);
+	if (eap_pwd_hmac_sha256_vector(3, addr, lens, mk)) {
 		os_free(cruft);
 		return -1;
 	}
-
-	if (crypto_bignum_to_bin(k, cruft, prime_len, prime_len) < 0) {
-		os_free(cruft);
-		return -1;
-	}
-
-	eap_pwd_h_update(hash, cruft, prime_len);
 	os_free(cruft);
-	eap_pwd_h_update(hash, confirm_peer, SHA256_MAC_LEN);
-	eap_pwd_h_update(hash, confirm_server, SHA256_MAC_LEN);
-	eap_pwd_h_final(hash, mk);
 
 	/* stretch the mk with the session-id to get MSK | EMSK */
 	if (eap_pwd_kdf(mk, SHA256_MAC_LEN,
@@ -401,6 +360,73 @@ int compute_keys(EAP_PWD_group *grp, const struct crypto_bignum *k,
 	os_memcpy(emsk, msk_emsk + EAP_MSK_LEN, EAP_EMSK_LEN);
 
 	return 1;
+}
+
+
+int compute_confirm(struct crypto_ec *group,
+		    struct crypto_bignum *k,
+		    struct crypto_ec_point *element1,
+		    struct crypto_bignum *scalar1,
+		    struct crypto_ec_point *element2,
+		    struct crypto_bignum *scalar2,
+		    u16 group_num,
+		    u8 *confirm)
+{
+	const size_t prime_len = crypto_ec_prime_len(group);
+	const size_t order_len = crypto_ec_order_len(group);
+	const size_t cruft_len = prime_len + (prime_len * 2 + order_len) * 2 + 4;
+	u8 *cruft = os_malloc(cruft_len);
+	if (!cruft) {
+		wpa_printf(MSG_INFO, "EAP-PWD: debug allocation fail");
+		return -1;
+	}
+	u8 *bin_k           = cruft;
+	u8 *bin_element1    = bin_k + prime_len;
+	u8 *bin_scalar1     = bin_element1 + prime_len * 2;
+	u8 *bin_element2    = bin_scalar1 + order_len;
+	u8 *bin_scalar2     = bin_element2 + prime_len * 2;
+	u8 *bin_ciphersuite = bin_scalar2 + order_len;
+	int ret = -1;
+
+	if (crypto_bignum_to_bin(k, bin_k, prime_len, prime_len) < 0)
+		goto fin;
+
+	/* element1: x, y */
+	if (crypto_ec_point_to_bin(group, element1,
+				   bin_element1, bin_element1+prime_len) < 0) {
+		wpa_printf(MSG_INFO, "EAP-PWD: confirm point assignment fail");
+		goto fin;
+	}
+
+	/* scalar1 */
+	if (crypto_bignum_to_bin(scalar1, bin_scalar1, order_len, order_len) < 0)
+		goto fin;
+
+	/* element2: x, y */
+	if (crypto_ec_point_to_bin(group, element2,
+				   bin_element2, bin_element2+prime_len) < 0) {
+		wpa_printf(MSG_INFO, "EAP-PWD: confirm point assignment fail");
+		goto fin;
+	}
+
+	/* scalar2 */
+	if (crypto_bignum_to_bin(scalar2, bin_scalar2, order_len, order_len) < 0)
+		goto fin;
+
+	/* ciphersuite: group | random_function | prf */
+	group_num = htons(group_num);
+	os_memcpy(bin_ciphersuite, &group_num, sizeof(u16));
+	bin_ciphersuite[2] = EAP_PWD_DEFAULT_RAND_FUNC;
+	bin_ciphersuite[3] = EAP_PWD_DEFAULT_PRF;
+
+	const u8 *addr = cruft;
+	size_t len = cruft_len;
+	eap_pwd_hmac_sha256_vector(1, &addr, &len, confirm);
+
+	ret = 0;
+fin:
+	bin_clear_free(cruft, cruft_len);
+	return ret;
 }
 
 
