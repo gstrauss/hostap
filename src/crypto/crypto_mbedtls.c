@@ -157,10 +157,6 @@
 #define CRYPTO_MBEDTLS_CRYPTO_CIPHER
 #endif /* crypto_cipher_*() */
 
-#if defined(EAP_PWD) || defined(EAP_SERVER_PWD) /* CONFIG_EAP_PWD=y */
-#define CRYPTO_MBEDTLS_CRYPTO_HASH
-#endif /* crypto_hash_*() */
-
 #if defined(EAP_PWD) || defined(EAP_SERVER_PWD) /* CONFIG_EAP_PWD=y */ \
  || defined(CONFIG_SAE) /* CONFIG_SAE=y */
 #define CRYPTO_MBEDTLS_CRYPTO_BIGNUM
@@ -1347,125 +1343,6 @@ void crypto_cipher_deinit(struct crypto_cipher *ctx)
 }
 
 #endif /* CRYPTO_MBEDTLS_CRYPTO_CIPHER */
-
-
-#ifdef CRYPTO_MBEDTLS_CRYPTO_HASH
-
-struct crypto_hash * crypto_hash_init(enum crypto_hash_alg alg, const u8 *key,
-				      size_t key_len)
-{
-	mbedtls_md_type_t md_type;
-	int is_hmac = 0;
-
-	switch (alg) {
-  #ifdef MBEDTLS_MD5_C
-	case CRYPTO_HASH_ALG_MD5:
-		md_type = MBEDTLS_MD_MD5;
-		break;
-  #endif
-  #ifdef MBEDTLS_SHA1_C
-	case CRYPTO_HASH_ALG_SHA1:
-		md_type = MBEDTLS_MD_SHA1;
-		break;
-  #endif
-  #ifdef MBEDTLS_MD5_C
-	case CRYPTO_HASH_ALG_HMAC_MD5:
-		md_type = MBEDTLS_MD_MD5;
-		is_hmac = 1;
-		break;
-  #endif
-  #ifdef MBEDTLS_SHA1_C
-	case CRYPTO_HASH_ALG_HMAC_SHA1:
-		md_type = MBEDTLS_MD_SHA1;
-		is_hmac = 1;
-		break;
-  #endif
-  #ifdef MBEDTLS_SHA256_C
-	case CRYPTO_HASH_ALG_SHA256:
-		md_type = MBEDTLS_MD_SHA256;
-		break;
-	case CRYPTO_HASH_ALG_HMAC_SHA256:
-		md_type = MBEDTLS_MD_SHA256;
-		is_hmac = 1;
-		break;
-  #endif
-  #ifdef MBEDTLS_SHA512_C
-	case CRYPTO_HASH_ALG_SHA384:
-		md_type = MBEDTLS_MD_SHA384;
-		break;
-	case CRYPTO_HASH_ALG_SHA512:
-		md_type = MBEDTLS_MD_SHA512;
-		break;
-  #endif
-	default:
-		return NULL;
-	}
-
-	const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(md_type);
-	if (!md_info)
-		return NULL;
-
-	mbedtls_md_context_t *mctx = os_malloc(sizeof(*mctx));
-	if (mctx == NULL)
-		return NULL;
-
-	mbedtls_md_init(mctx);
-	if (mbedtls_md_setup(mctx, md_info, is_hmac) != 0) {
-		os_free(mctx);
-		return NULL;
-	}
-
-	if (is_hmac)
-		mbedtls_md_hmac_starts(mctx, key, key_len);
-	else
-		mbedtls_md_starts(mctx);
-	return (struct crypto_hash *)((uintptr_t)mctx | is_hmac);
-}
-
-void crypto_hash_update(struct crypto_hash *ctx, const u8 *data, size_t len)
-{
-	mbedtls_md_context_t *mctx = (mbedtls_md_context_t*)((uintptr_t)ctx & ~1uL);
-  #if 0
-	/*(mbedtls_md_hmac_update() and mbedtls_md_update()
-	 * make same modifications under the hood in mbedtls)*/
-	if ((uintptr_t)ctx & 1uL)
-		mbedtls_md_hmac_update(mctx, data, len);
-	else
-  #endif
-		mbedtls_md_update(mctx, data, len);
-}
-
-int crypto_hash_finish(struct crypto_hash *ctx, u8 *mac, size_t *len)
-{
-	mbedtls_md_context_t *mctx = (mbedtls_md_context_t*)((uintptr_t)ctx & ~1uL);
-	if (mac != NULL && len != NULL) { /*(NULL if caller just freeing context)*/
-	  #if MBEDTLS_VERSION_NUMBER >= 0x03020000 /* mbedtls 3.2.0 */
-		const mbedtls_md_info_t *md_info = mbedtls_md_info_from_ctx(mctx);
-	  #else
-		const mbedtls_md_info_t *md_info = mctx->MBEDTLS_PRIVATE(md_info);
-	  #endif
-		size_t maclen = mbedtls_md_get_size(md_info);
-		if (*len < maclen) {
-			*len = maclen;
-			/*(note: ctx not freed; can call again with larger *len)*/
-			return -1;
-		}
-		*len = maclen;
-		if ((uintptr_t)ctx & 1uL)
-			mbedtls_md_hmac_finish(mctx, mac);
-		else
-			mbedtls_md_finish(mctx, mac);
-	}
-	mbedtls_md_free(mctx);
-	os_free(mctx);
-
-	if (TEST_FAIL())
-		return -1;
-
-	return 0;
-}
-
-#endif /* CRYPTO_MBEDTLS_CRYPTO_HASH */
 
 
 #ifdef CRYPTO_MBEDTLS_CRYPTO_BIGNUM
