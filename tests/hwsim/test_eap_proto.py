@@ -8138,7 +8138,7 @@ def test_eap_proto_pwd_errors(dev, apdev):
             dev[0].request("REMOVE_NETWORK all")
             dev[0].wait_disconnected()
 
-    for i in range(1, 12):
+    for i in range(1, 5):
         with alloc_fail(dev[0], i, "eap_pwd_perform_confirm_exchange"):
             dev[0].connect("eap-test", key_mgmt="WPA-EAP", scan_freq="2412",
                            eap="PWD", identity="pwd user",
@@ -8195,7 +8195,7 @@ def test_eap_proto_pwd_errors(dev, apdev):
              (1, "=crypto_ec_point_add;eap_pwd_perform_commit_exchange"),
              (1, "=crypto_ec_point_invert;eap_pwd_perform_commit_exchange"),
              (1, "=crypto_ec_point_to_bin;eap_pwd_perform_commit_exchange"),
-             (1, "crypto_hash_finish;eap_pwd_kdf"),
+             (1, "eap_pwd_kdf"),
              (1, "crypto_ec_point_from_bin;eap_pwd_get_element"),
              (3, "crypto_bignum_init;compute_password_element"),
              (4, "crypto_bignum_init;compute_password_element"),
@@ -8284,13 +8284,13 @@ def test_eap_proto_pwd_errors_server(dev, apdev):
              (1, "eap_pwd_build_id_req"),
              (1, "eap_pwd_build_commit_req"),
              (1, "eap_pwd_build_confirm_req"),
-             (1, "eap_pwd_h_init;eap_pwd_build_confirm_req"),
+             (1, "compute_confirm;eap_pwd_build_confirm_req"),
              (1, "wpabuf_alloc;eap_pwd_build_confirm_req"),
              (1, "eap_msg_alloc;eap_pwd_build_req"),
              (1, "eap_pwd_process_id_resp"),
              (1, "get_eap_pwd_group;eap_pwd_process_id_resp"),
              (1, "eap_pwd_process_confirm_resp"),
-             (1, "eap_pwd_h_init;eap_pwd_process_confirm_resp"),
+             (1, "compute_confirm;eap_pwd_process_confirm_resp"),
              (1, "compute_keys;eap_pwd_process_confirm_resp"),
              (1, "eap_pwd_getkey"),
              (1, "eap_pwd_get_emsk"),
