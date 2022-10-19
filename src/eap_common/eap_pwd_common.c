@@ -99,56 +99,37 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 			     const u8 *id_peer, size_t id_peer_len,
 			     const u8 *token)
 {
-	struct crypto_bignum *qr = NULL, *qnr = NULL;
-	u8 qr_bin[MAX_ECC_PRIME_LEN];
-	u8 qnr_bin[MAX_ECC_PRIME_LEN];
-	u8 qr_or_qnr_bin[MAX_ECC_PRIME_LEN];
-	u8 x_bin[MAX_ECC_PRIME_LEN];
-	u8 prime_bin[MAX_ECC_PRIME_LEN];
-	u8 x_y[2 * MAX_ECC_PRIME_LEN];
-	struct crypto_bignum *tmp2 = NULL, *y = NULL;
-	unsigned char pwe_digest[SHA256_MAC_LEN], *prfbuf = NULL, ctr;
 	int ret = 0, res;
+	u8 ctr, found_ctr = 0, is_odd = 0;
 	u8 found = 0; /* 0 (false) or 0xff (true) to be used as const_time_*
 		       * mask */
-	size_t primebytelen = 0, primebitlen;
-	struct crypto_bignum *x_candidate = NULL;
-	const struct crypto_bignum *prime;
-	u8 found_ctr = 0, is_odd = 0;
-	int cmp_prime;
-	unsigned int in_range;
-	unsigned int is_eq;
+	const size_t primebytelen = crypto_ec_prime_len(grp->group);
+	const size_t primebitlen = crypto_ec_prime_len_bits(grp->group);
+	const struct crypto_bignum *prime = crypto_ec_get_prime(grp->group);
 	const u8 *addr[5] = { token, id_peer, id_server, password, &ctr };
 	size_t lens[5] = { sizeof(u32), id_peer_len, id_server_len,
 	                   password_len, sizeof(ctr) };
+	u8 *prfbuf, *x_bin, *qr_bin, *qnr_bin, *prime_bin;
+	u8 pwe_digest[SHA256_MAC_LEN+MAX_ECC_PRIME_LEN*5];
+	x_bin      = pwe_digest+SHA256_MAC_LEN;
+	prfbuf     = x_bin+primebytelen;
+	qr_bin     = prfbuf+primebytelen;
+	qnr_bin    = qr_bin+primebytelen;
+	prime_bin  = qnr_bin+primebytelen;
 
 	if (grp->pwe)
 		return -1;
 
-	os_memset(x_bin, 0, sizeof(x_bin));
-
-	prime = crypto_ec_get_prime(grp->group);
-	primebitlen = crypto_ec_prime_len_bits(grp->group);
-	primebytelen = crypto_ec_prime_len(grp->group);
-	if (crypto_bignum_to_bin(prime, prime_bin, sizeof(prime_bin),
+	if (crypto_bignum_to_bin(prime, prime_bin, primebytelen,
 				 primebytelen) < 0)
 		return -1;
 
-	if ((prfbuf = os_malloc(primebytelen)) == NULL) {
-		wpa_printf(MSG_INFO, "EAP-pwd: unable to malloc space for prf "
-			   "buffer");
-		goto fail;
-	}
-
 	/* get a random quadratic residue and nonresidue */
-	if (dragonfly_get_random_qr_qnr(prime, &qr, &qnr) < 0 ||
-	    crypto_bignum_to_bin(qr, qr_bin, sizeof(qr_bin),
-				 primebytelen) < 0 ||
-	    crypto_bignum_to_bin(qnr, qnr_bin, sizeof(qnr_bin),
-				 primebytelen) < 0)
-		goto fail;
+	if (dragonfly_get_random_qr_qnr_bin(prime, primebytelen,
+	                                    qr_bin, qnr_bin) < 0)
+		return -1;
 
-	os_memset(prfbuf, 0, primebytelen);
+	os_memset(x_bin, 0, primebytelen); /*(init for constant time copying)*/
 	ctr = 0;
 
 	/*
@@ -177,47 +158,17 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 		if (primebitlen % 8)
 			buf_shift_right(prfbuf, primebytelen,
 					8 - primebitlen % 8);
-		cmp_prime = const_time_memcmp(prfbuf, prime_bin, primebytelen);
-		/* Create a const_time mask for selection based on prf result
-		 * being smaller than prime. */
-		in_range = const_time_fill_msb((unsigned int) cmp_prime);
-		/* The algorithm description would skip the next steps if
-		 * cmp_prime >= 0, but go through them regardless to minimize
-		 * externally observable differences in behavior. */
-
-		crypto_bignum_deinit(x_candidate, 1);
-		x_candidate = crypto_bignum_init_set(prfbuf, primebytelen);
-		if (!x_candidate) {
-			wpa_printf(MSG_INFO,
-				   "EAP-pwd: unable to create x_candidate");
-			goto fail;
-		}
-
 		wpa_hexdump_key(MSG_DEBUG, "EAP-pwd: x_candidate",
 				prfbuf, primebytelen);
 		const_time_select_bin(found, x_bin, prfbuf, primebytelen,
 				      x_bin);
 
-		/*
-		 * compute y^2 using the equation of the curve
-		 *
-		 *      y^2 = x^3 + ax + b
-		 */
-		crypto_bignum_deinit(tmp2, 1);
-		tmp2 = crypto_ec_point_compute_y_sqr(grp->group, x_candidate);
-		if (!tmp2)
-			goto fail;
-
-		res = dragonfly_is_quadratic_residue_blind(grp->group, qr_bin,
-							   qnr_bin, tmp2);
+		res = dragonfly_test_x(grp->group, prime_bin, primebytelen,
+		                       qr_bin, qnr_bin, prfbuf);
 		if (res < 0)
 			goto fail;
 		found_ctr = const_time_select_u8(found, found_ctr, ctr);
-		/* found is 0 or 0xff here and res is 0 or 1. Bitwise OR of them
-		 * (with res converted to 0/0xff and masked with prf being below
-		 * prime) handles this in constant time.
-		 */
-		found |= (res & in_range) * 0xff;
+		found |= res;
 	}
 	if (found == 0) {
 		wpa_printf(MSG_INFO,
@@ -226,44 +177,14 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 		goto fail;
 	}
 
-	/*
-	 * We know x_candidate is a quadratic residue so set it here.
-	 */
-	crypto_bignum_deinit(x_candidate, 1);
-	x_candidate = crypto_bignum_init_set(x_bin, primebytelen);
-	if (!x_candidate)
-		goto fail;
-
-	/* y = sqrt(x^3 + ax + b) mod p
-	 * if LSB(y) == LSB(pwd-seed): PWE = (x, y)
-	 * else: PWE = (x, p - y)
-	 *
-	 * Calculate y and the two possible values for PWE and after that,
-	 * use constant time selection to copy the correct alternative.
-	 */
-	y = crypto_ec_point_compute_y_sqr(grp->group, x_candidate);
-	if (!y ||
-	    dragonfly_sqrt(grp->group, y, y) < 0 ||
-	    crypto_bignum_to_bin(y, x_y, MAX_ECC_PRIME_LEN, primebytelen) < 0 ||
-	    crypto_bignum_sub(prime, y, y) < 0 ||
-	    crypto_bignum_to_bin(y, x_y + MAX_ECC_PRIME_LEN,
-				 MAX_ECC_PRIME_LEN, primebytelen) < 0) {
-		wpa_printf(MSG_DEBUG, "EAP-pwd: Could not solve y");
-		goto fail;
-	}
-
-	/* Constant time selection of the y coordinate from the two
-	 * options */
-	is_eq = const_time_eq(is_odd, x_y[primebytelen - 1] & 0x01);
-	const_time_select_bin(is_eq, x_y, x_y + MAX_ECC_PRIME_LEN,
-			      primebytelen, x_y + primebytelen);
-	os_memcpy(x_y, x_bin, primebytelen);
-	wpa_hexdump_key(MSG_DEBUG, "EAP-pwd: PWE", x_y, 2 * primebytelen);
-	grp->pwe = crypto_ec_point_from_bin(grp->group, x_y);
+	grp->pwe = dragonfly_derive_point(grp->group, x_bin, prime,
+	                                  primebytelen, is_odd);
 	if (!grp->pwe) {
 		wpa_printf(MSG_DEBUG, "EAP-pwd: Could not generate PWE");
 		goto fail;
 	}
+
+	crypto_ec_point_debug_print(grp->group, grp->pwe, "EAP-pwd: PWE");
 
 	/*
 	 * If there's a solution to the equation then the point must be on the
@@ -284,18 +205,7 @@ int compute_password_element(EAP_PWD_group *grp, u16 num,
 		ret = 1;
 	}
 	/* cleanliness and order.... */
-	crypto_bignum_deinit(x_candidate, 1);
-	crypto_bignum_deinit(tmp2, 1);
-	crypto_bignum_deinit(y, 1);
-	crypto_bignum_deinit(qr, 1);
-	crypto_bignum_deinit(qnr, 1);
-	bin_clear_free(prfbuf, primebytelen);
-	os_memset(qr_bin, 0, sizeof(qr_bin));
-	os_memset(qnr_bin, 0, sizeof(qnr_bin));
-	os_memset(qr_or_qnr_bin, 0, sizeof(qr_or_qnr_bin));
-	os_memset(pwe_digest, 0, sizeof(pwe_digest));
-	forced_memzero(x_y, sizeof(x_y));
-
+	forced_memzero(pwe_digest, SHA256_MAC_LEN+primebytelen*4);
 	return ret;
 }
 

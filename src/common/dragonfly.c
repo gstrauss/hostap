@@ -50,6 +50,7 @@ unsigned int dragonfly_min_pwe_loop_iter(int group)
 }
 
 
+static
 int dragonfly_get_random_qr_qnr(const struct crypto_bignum *prime,
 				struct crypto_bignum **qr,
 				struct crypto_bignum **qnr)
@@ -87,6 +88,21 @@ int dragonfly_get_random_qr_qnr(const struct crypto_bignum *prime,
 }
 
 
+int dragonfly_get_random_qr_qnr_bin(const struct crypto_bignum *prime,
+				    size_t prime_len, u8 *qr_bin, u8 *qnr_bin)
+{
+	int res = 0;
+	struct crypto_bignum *qr = NULL, *qnr = NULL;
+	if (dragonfly_get_random_qr_qnr(prime, &qr, &qnr) < 0 ||
+	    crypto_bignum_to_bin(qr, qr_bin, prime_len, prime_len) < 0 ||
+	    crypto_bignum_to_bin(qnr, qnr_bin, prime_len, prime_len) < 0)
+		res = -1;
+	crypto_bignum_deinit(qr, 1);
+	crypto_bignum_deinit(qnr, 1);
+	return res;
+}
+
+
 static struct crypto_bignum *
 dragonfly_get_rand_1_to_p_1(const struct crypto_bignum *prime)
 {
@@ -109,6 +125,7 @@ dragonfly_get_rand_1_to_p_1(const struct crypto_bignum *prime)
 }
 
 
+static
 int dragonfly_is_quadratic_residue_blind(struct crypto_ec *ec,
 					 const u8 *qr, const u8 *qnr,
 					 const struct crypto_bignum *val)
@@ -173,7 +190,7 @@ int dragonfly_is_quadratic_residue_blind(struct crypto_ec *ec,
 	/* branchless version of res = res == check
 	 * (res is -1, 0, or 1; check is -1 or 1) */
 	mask = const_time_eq(res, check);
-	res = const_time_select_int(mask, 1, 0);
+	res = const_time_select_int(mask, 0xFF, 0);
 fail:
 	crypto_bignum_deinit(num, 1);
 	crypto_bignum_deinit(r, 1);
@@ -249,4 +266,92 @@ int dragonfly_sqrt(struct crypto_ec *ec, const struct crypto_bignum *val,
 	crypto_bignum_deinit(tmp, 0);
 	crypto_bignum_deinit(one, 0);
 	return ret;
+}
+
+
+int dragonfly_test_x(struct crypto_ec *group, const u8 *prime, size_t prime_len,
+		     const u8 *qr, const u8 *qnr, const u8 *x_bin)
+{
+	int cmp_prime = const_time_memcmp(x_bin, prime, prime_len);
+	/* The algorithm description would skip the next steps if
+	 * cmp_prime >= 0 (return 0 here), but go through them regardless to
+	 * minimize externally observable differences in behavior. */
+
+	struct crypto_bignum *x = crypto_bignum_init_set(x_bin, prime_len);
+	if (!x)
+		return -1;
+	/*
+	 * compute y^2 using the equation of the curve
+	 *
+	 *      y^2 = x^3 + ax + b
+	 */
+	struct crypto_bignum *y_sqr = crypto_ec_point_compute_y_sqr(group, x);
+	crypto_bignum_deinit(x, 1);
+	if (!y_sqr)
+		return -1;
+
+	int res = dragonfly_is_quadratic_residue_blind(group, qr, qnr, y_sqr);
+	crypto_bignum_deinit(y_sqr, 1);
+	if (res < 0)
+		return res;
+	/* Create a const_time mask for selection based on prf result
+	 * being smaller than prime. */
+	unsigned int in_range = const_time_fill_msb((unsigned int) cmp_prime);
+	return const_time_select_int(in_range, res, 0);
+}
+
+
+struct crypto_ec_point * dragonfly_derive_point(struct crypto_ec *group,
+						const u8 *x_bin,
+						const struct crypto_bignum *prime,
+						size_t prime_len,
+						int pwd_seed_odd)
+{
+  #if 0
+	struct crypto_ec_point *pwe = NULL;
+	u8 bin[1+DRAGONFLY_MAX_ECC_PRIME_LEN];
+	bin[0] = const_time_select_u8(pwd_seed_odd ? 0x03 : 0x02);
+	os_memcpy(bin+1, x_bin, prime_len);
+	/*(crypto_ec_point_from_bin() does not support compressed point format.
+	 * If a new crypto.h interface did, then that might be used here.)*/
+	/*pwe = crypto_ec_point_from_compressed(group, bin);*//*(fabricated)*/
+	forced_memzero(bin, 1+prime_len);
+	return pwe;
+  #else
+	struct crypto_ec_point *pwe = NULL;
+	struct crypto_bignum *x = NULL, *y = NULL;
+	u8 x_y[2 * DRAGONFLY_MAX_ECC_PRIME_LEN];
+
+	x = crypto_bignum_init_set(x_bin, prime_len);
+	if (!x)
+		return NULL;
+
+	/* y = sqrt(x^3 + ax + b) mod p
+	 * if LSB(save) == LSB(y): PWE = (x, y)
+	 * else: PWE = (x, p - y)
+	 *
+	 * Calculate y and the two possible values for PWE and after that,
+	 * use constant time selection to copy the correct alternative.
+	 */
+	y = crypto_ec_point_compute_y_sqr(group, x);
+	if (!y ||
+	    dragonfly_sqrt(group, y, y) < 0 ||
+	    crypto_bignum_to_bin(y, x_y, prime_len, prime_len) < 0 ||
+	    crypto_bignum_sub(prime, y, y) < 0 ||
+	    crypto_bignum_to_bin(y, x_y+prime_len, prime_len, prime_len) < 0) {
+		goto fail;
+	}
+
+	unsigned int is_eq = const_time_eq(pwd_seed_odd,
+	                                   x_y[prime_len - 1] & 0x01);
+	const_time_select_bin(is_eq, x_y, x_y + prime_len,
+			      prime_len, x_y + prime_len);
+	os_memcpy(x_y, x_bin, prime_len);
+	pwe = crypto_ec_point_from_bin(group, x_y);
+fail:
+	forced_memzero(x_y, prime_len*2);
+	crypto_bignum_deinit(y, 1);
+	crypto_bignum_deinit(x, 1);
+	return pwe;
+  #endif
 }

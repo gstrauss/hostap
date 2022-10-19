@@ -17,17 +17,20 @@ struct crypto_ec;
 
 int dragonfly_suitable_group(int group, int ecc_only);
 unsigned int dragonfly_min_pwe_loop_iter(int group);
-int dragonfly_get_random_qr_qnr(const struct crypto_bignum *prime,
-				struct crypto_bignum **qr,
-				struct crypto_bignum **qnr);
-int dragonfly_is_quadratic_residue_blind(struct crypto_ec *ec,
-					 const u8 *qr, const u8 *qnr,
-					 const struct crypto_bignum *val);
+int dragonfly_get_random_qr_qnr_bin(const struct crypto_bignum *prime,
+				    size_t prime_len, u8 *qr_bin, u8 *qnr_bin);
 int dragonfly_generate_scalar(const struct crypto_bignum *order,
 			      struct crypto_bignum *_rand,
 			      struct crypto_bignum *_mask,
 			      struct crypto_bignum *scalar);
 int dragonfly_sqrt(struct crypto_ec *ec, const struct crypto_bignum *val,
 		   struct crypto_bignum *res);
+int dragonfly_test_x(struct crypto_ec *group, const u8 *prime, size_t prime_len,
+		     const u8 *qr, const u8 *qnr, const u8 *pwd_value);
+struct crypto_ec_point * dragonfly_derive_point(struct crypto_ec *group,
+						const u8 *x_bin,
+						const struct crypto_bignum *prime,
+						size_t prime_len,
+						int pwd_seed_odd);
 
 #endif /* DRAGONFLY_H */
