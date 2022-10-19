@@ -8194,7 +8194,7 @@ def test_eap_proto_pwd_errors(dev, apdev):
              (3, "=crypto_ec_point_mul;eap_pwd_perform_commit_exchange"),
              (1, "=crypto_ec_point_add;eap_pwd_perform_commit_exchange"),
              (1, "=crypto_ec_point_invert;eap_pwd_perform_commit_exchange"),
-             (1, "=crypto_ec_point_to_bin;eap_pwd_perform_commit_exchange"),
+             (1, "=crypto_bignum_to_bin;eap_pwd_perform_commit_exchange"),
              (1, "eap_pwd_kdf"),
              (1, "crypto_ec_point_from_bin;eap_pwd_get_element"),
              (3, "crypto_bignum_init;compute_password_element"),

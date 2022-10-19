@@ -1560,7 +1560,7 @@ def test_sae_pwe_failure(dev, apdev):
                        scan_freq="2412")
         dev[0].request("REMOVE_NETWORK all")
         dev[0].wait_disconnected()
-    with fail_test(dev[0], 1, "sae_test_pwd_seed_ecc"):
+    with fail_test(dev[0], 1, "dragonfly_test_x"):
         dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE",
                        scan_freq="2412")
         dev[0].request("REMOVE_NETWORK all")
@@ -1601,8 +1601,8 @@ def test_sae_bignum_failure(dev, apdev):
              (2, "crypto_bignum_mulmod;dragonfly_is_quadratic_residue_blind"),
              (3, "crypto_bignum_mulmod;dragonfly_is_quadratic_residue_blind"),
              (1, "crypto_bignum_legendre;dragonfly_is_quadratic_residue_blind"),
-             (1, "crypto_bignum_init_set;sae_test_pwd_seed_ecc"),
-             (1, "crypto_ec_point_compute_y_sqr;sae_test_pwd_seed_ecc"),
+             (1, "crypto_bignum_init_set;dragonfly_test_x"),
+             (1, "crypto_ec_point_compute_y_sqr;dragonfly_test_x"),
              (1, "crypto_bignum_to_bin;sae_derive_pwe_ecc"),
              (1, "crypto_ec_point_compute_y_sqr;sae_derive_pwe_ecc"),
              (1, "crypto_ec_point_init;sae_derive_commit_element_ecc"),
