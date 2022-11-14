@@ -2010,13 +2010,17 @@ void dh5_free(void *ctx)
 
 #include <mbedtls/ecp.h>
 
-#define CRYPTO_EC_pbits(e) (((mbedtls_ecp_group *)(e))->pbits)
-#define CRYPTO_EC_plen(e) ((((mbedtls_ecp_group *)(e))->pbits+7)>>3)
-#define CRYPTO_EC_P(e)    (&((mbedtls_ecp_group *)(e))->P)
-#define CRYPTO_EC_N(e)    (&((mbedtls_ecp_group *)(e))->N)
-#define CRYPTO_EC_A(e)    (&((mbedtls_ecp_group *)(e))->A)
-#define CRYPTO_EC_B(e)    (&((mbedtls_ecp_group *)(e))->B)
-#define CRYPTO_EC_G(e)    (&((mbedtls_ecp_group *)(e))->G)
+#define CRYPTO_EC_pbits(e) (((const mbedtls_ecp_group *)(e))->pbits)
+#define CRYPTO_EC_plen(e) ((((const mbedtls_ecp_group *)(e))->pbits+7)>>3)
+#define CRYPTO_EC_P(e)    (&((const mbedtls_ecp_group *)(e))->P)
+#define CRYPTO_EC_N(e)    (&((const mbedtls_ecp_group *)(e))->N)
+#define CRYPTO_EC_A(e)    (&((const mbedtls_ecp_group *)(e))->A)
+#define CRYPTO_EC_B(e)    (&((const mbedtls_ecp_group *)(e))->B)
+#define CRYPTO_EC_G(e)    (&((const mbedtls_ecp_group *)(e))->G)
+
+#define ECP_KP_grp(kp)  ((const mbedtls_ecp_group *)&(kp)->MBEDTLS_PRIVATE(grp))
+#define ECP_KP_Q(kp)    ((const mbedtls_ecp_point *)&(kp)->MBEDTLS_PRIVATE(Q))
+#define ECP_KP_d(kp)    ((const mbedtls_mpi *)&(kp)->MBEDTLS_PRIVATE(d))
 
 static mbedtls_ecp_group_id crypto_mbedtls_ecp_group_id_from_ike_id(int group)
 {
@@ -2185,7 +2189,7 @@ struct crypto_ecdh * crypto_ecdh_init2(int group,
 		mbedtls_mpi_free(&d);
 	  #else
 		if (mbedtls_ecp_group_load(&ecdh->grp, grp_id) == 0
-		    && mbedtls_ecp_copy(&ecdh->Q, &ecp_kp->MBEDTLS_PRIVATE(Q)) == 0)
+		    && mbedtls_ecp_copy(&ecdh->Q, ECP_KP_Q(ecp_kp)) == 0)
 			return ecdh;
 	  #endif
 	}
@@ -2514,6 +2518,9 @@ void crypto_ec_point_deinit(struct crypto_ec_point *p, int clear)
 int crypto_ec_point_x(struct crypto_ec *e, const struct crypto_ec_point *p,
 		      struct crypto_bignum *x)
 {
+	/* future: to avoid MBEDTLS_PRIVATE(), could write pt to stack buf,
+	 *         copy x, then wipe stack buf */
+
 	mbedtls_mpi *px = &((mbedtls_ecp_point *)p)->MBEDTLS_PRIVATE(X);
 	return mbedtls_mpi_copy((mbedtls_mpi *)x, px)
 	  ? -1
@@ -2525,6 +2532,9 @@ int crypto_ec_point_to_bin(struct crypto_ec *e,
 {
 	if (TEST_FAIL())
 		return -1;
+
+	/* future: to avoid MBEDTLS_PRIVATE(), could write pt to stack buf,
+	 *         copy x and y, then wipe stack buf */
 
 	/* crypto.h documents crypto_ec_point_to_bin() output is big-endian */
 	size_t len = CRYPTO_EC_plen(e);
@@ -2659,7 +2669,8 @@ int crypto_ec_point_invert(struct crypto_ec *e, struct crypto_ec_point *p)
 
 #ifdef MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED
 static int
-crypto_ec_point_y_sqr_weierstrass(mbedtls_ecp_group *e, const mbedtls_mpi *x,
+crypto_ec_point_y_sqr_weierstrass(const mbedtls_ecp_group *e,
+                                  const mbedtls_mpi *x,
                                   mbedtls_mpi *y2)
 {
 	/* MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS  y^2 = x^3 + a x + b    */
@@ -2721,7 +2732,8 @@ crypto_ec_point_y_sqr_weierstrass(mbedtls_ecp_group *e, const mbedtls_mpi *x,
 #if 0 /* not used by hostap */
 #ifdef MBEDTLS_ECP_MONTGOMERY_ENABLED
 static int
-crypto_ec_point_y_sqr_montgomery(mbedtls_ecp_group *e, const mbedtls_mpi *x,
+crypto_ec_point_y_sqr_montgomery(const mbedtls_ecp_group *e,
+                                 const mbedtls_mpi *x,
                                  mbedtls_mpi *y2)
 {
 	/* XXX: !!! must be reviewed and audited for correctness !!! */
@@ -2762,9 +2774,9 @@ crypto_ec_point_compute_y_sqr(struct crypto_ec *e,
 	mbedtls_mpi_init(y2);
 
   #ifdef MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED
-	if (mbedtls_ecp_get_type((mbedtls_ecp_group *)e)
+	if (mbedtls_ecp_get_type((const mbedtls_ecp_group *)e)
 	      == MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS
-	    && crypto_ec_point_y_sqr_weierstrass((mbedtls_ecp_group *)e,
+	    && crypto_ec_point_y_sqr_weierstrass((const mbedtls_ecp_group *)e,
 	                                         (const mbedtls_mpi *)x,
 	                                         y2) == 0)
 		return (struct crypto_bignum *)y2;
@@ -2773,7 +2785,7 @@ crypto_ec_point_compute_y_sqr(struct crypto_ec *e,
   #ifdef MBEDTLS_ECP_MONTGOMERY_ENABLED
 	if (mbedtls_ecp_get_type((mbedtls_ecp_group *)e)
 	      == MBEDTLS_ECP_TYPE_MONTGOMERY
-	    && crypto_ec_point_y_sqr_montgomery((mbedtls_ecp_group *)e,
+	    && crypto_ec_point_y_sqr_montgomery((const mbedtls_ecp_group *)e,
 	                                        (const mbedtls_mpi *)x,
 	                                        y2) == 0)
 		return (struct crypto_bignum *)y2;
@@ -3156,7 +3168,7 @@ struct wpabuf * crypto_ec_key_get_subject_public_key(struct crypto_ec_key *key)
 	mbedtls_ecp_keypair *ecp_kp = mbedtls_pk_ec(*(mbedtls_pk_context *)key);
 	if (ecp_kp == NULL)
 		return NULL;
-	mbedtls_ecp_group *grp = &ecp_kp->MBEDTLS_PRIVATE(grp);
+	const mbedtls_ecp_group *grp = ECP_KP_grp(ecp_kp);
 	/*  Note: sae_pk.c expects pubkey point in compressed format,
 	 *        but mbedtls_pk_write_pubkey_der() writes uncompressed format.
 	 *        Manually translate format and update lengths in DER format */
@@ -3253,7 +3265,7 @@ struct wpabuf * crypto_ec_key_get_pubkey_point(struct crypto_ec_key *key,
 	mbedtls_ecp_keypair *ecp_kp = mbedtls_pk_ec(*(mbedtls_pk_context *)key);
 	if (ecp_kp == NULL)
 		return NULL;
-	mbedtls_ecp_group *grp = &ecp_kp->MBEDTLS_PRIVATE(grp);
+	const mbedtls_ecp_group *grp = ECP_KP_grp(ecp_kp);
 	size_t len = CRYPTO_EC_plen(grp);
   #ifdef MBEDTLS_ECP_MONTGOMERY_ENABLED
 	/* len */
@@ -3265,7 +3277,7 @@ struct wpabuf * crypto_ec_key_get_pubkey_point(struct crypto_ec_key *key,
 	struct wpabuf *buf = wpabuf_alloc(len);
 	if (buf == NULL)
 		return NULL;
-	mbedtls_ecp_point *ecp_kp_Q = &ecp_kp->MBEDTLS_PRIVATE(Q);
+	const mbedtls_ecp_point *ecp_kp_Q = ECP_KP_Q(ecp_kp);
 	if (mbedtls_ecp_point_write_binary(grp, ecp_kp_Q,
 	                                   MBEDTLS_ECP_PF_UNCOMPRESSED, &len,
 	                                   wpabuf_mhead_u8(buf), len) == 0) {
@@ -3289,7 +3301,7 @@ crypto_ec_key_get_public_key(struct crypto_ec_key *key)
 	if (p != NULL) {
 		/*(mbedtls_ecp_export() uses &ecp_kp->MBEDTLS_PRIVATE(grp))*/
 		mbedtls_ecp_point_init(p);
-		mbedtls_ecp_point *ecp_kp_Q = &ecp_kp->MBEDTLS_PRIVATE(Q);
+		const mbedtls_ecp_point *ecp_kp_Q = ECP_KP_Q(ecp_kp);
 		if (mbedtls_ecp_copy(p, ecp_kp_Q)) {
 			mbedtls_ecp_point_free(p);
 			os_free(p);
@@ -3309,7 +3321,7 @@ crypto_ec_key_get_private_key(struct crypto_ec_key *key)
 	if (bn) {
 		/*(mbedtls_ecp_export() uses &ecp_kp->MBEDTLS_PRIVATE(grp))*/
 		mbedtls_mpi_init(bn);
-		mbedtls_mpi *ecp_kp_d = &ecp_kp->MBEDTLS_PRIVATE(d);
+		const mbedtls_mpi *ecp_kp_d = ECP_KP_d(ecp_kp);
 		if (mbedtls_mpi_copy(bn, ecp_kp_d)) {
 			mbedtls_mpi_free(bn);
 			os_free(bn);
@@ -3402,7 +3414,7 @@ struct wpabuf * crypto_ec_key_sign_r_s(struct crypto_ec_key *key,
 	/* write raw r and s into out
 	 * (including removal of leading 0 if added for ASN.1 integer)
 	 * note: DPP caller expects raw r, s each padded to prime len */
-	mbedtls_ecp_group *ecp_kp_grp = &ecp_kp->MBEDTLS_PRIVATE(grp);
+	const mbedtls_ecp_group *ecp_kp_grp = ECP_KP_grp(ecp_kp);
 	size_t plen = CRYPTO_EC_plen(ecp_kp_grp);
 	if (rlen > plen) {
 		r += (rlen - plen);
@@ -3451,8 +3463,9 @@ int crypto_ec_key_verify_signature_r_s(struct crypto_ec_key *key,
 	mbedtls_ecp_keypair *ecp_kp = mbedtls_pk_ec(*(mbedtls_pk_context *)key);
 	if (ecp_kp == NULL)
 		return -1;
+	/* mbedtls_ecdsa_verify() does not take (const mbedtls_ecp_group *) */
 	mbedtls_ecp_group *ecp_kp_grp = &ecp_kp->MBEDTLS_PRIVATE(grp);
-	mbedtls_ecp_point *ecp_kp_Q = &ecp_kp->MBEDTLS_PRIVATE(Q);
+	const mbedtls_ecp_point *ecp_kp_Q = ECP_KP_Q(ecp_kp);
 
 	mbedtls_mpi mpi_r;
 	mbedtls_mpi mpi_s;
@@ -3476,8 +3489,8 @@ int crypto_ec_key_group(struct crypto_ec_key *key)
 	mbedtls_ecp_keypair *ecp_kp = mbedtls_pk_ec(*(mbedtls_pk_context *)key);
 	if (ecp_kp == NULL)
 		return -1;
-	mbedtls_ecp_group *ecp_group = &ecp_kp->MBEDTLS_PRIVATE(grp);
-	return crypto_mbedtls_ike_id_from_ecp_group_id(ecp_group->id);
+	const mbedtls_ecp_group *ecp_kp_grp = ECP_KP_grp(ecp_kp);
+	return crypto_mbedtls_ike_id_from_ecp_group_id(ecp_kp_grp->id);
 }
 
 #ifdef CRYPTO_MBEDTLS_CRYPTO_EC_DPP
@@ -3499,10 +3512,10 @@ int crypto_ec_key_cmp(struct crypto_ec_key *key1, struct crypto_ec_key *key2)
 	mbedtls_ecp_keypair *ecp_kp2=mbedtls_pk_ec(*(mbedtls_pk_context *)key2);
 	if (ecp_kp1 == NULL || ecp_kp2 == NULL)
 		return -1;
-	mbedtls_ecp_group *ecp_kp1_grp = &ecp_kp1->MBEDTLS_PRIVATE(grp);
-	mbedtls_ecp_group *ecp_kp2_grp = &ecp_kp2->MBEDTLS_PRIVATE(grp);
-	mbedtls_ecp_point *ecp_kp1_Q = &ecp_kp1->MBEDTLS_PRIVATE(Q);
-	mbedtls_ecp_point *ecp_kp2_Q = &ecp_kp2->MBEDTLS_PRIVATE(Q);
+	const mbedtls_ecp_group *ecp_kp1_grp = ECP_KP_grp(ecp_kp1);
+	const mbedtls_ecp_group *ecp_kp2_grp = ECP_KP_grp(ecp_kp2);
+	const mbedtls_ecp_point *ecp_kp1_Q = ECP_KP_Q(ecp_kp1);
+	const mbedtls_ecp_point *ecp_kp2_Q = ECP_KP_Q(ecp_kp2);
 	return ecp_kp1_grp->id != ecp_kp2_grp->id
 	    || mbedtls_ecp_point_cmp(ecp_kp1_Q, ecp_kp2_Q) ? -1 : 0;
 #endif
