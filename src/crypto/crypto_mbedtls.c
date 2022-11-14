@@ -1598,15 +1598,37 @@ int crypto_bignum_cmp(const struct crypto_bignum *a,
 
 int crypto_bignum_is_zero(const struct crypto_bignum *a)
 {
+  #if 0
 	/* XXX: src/common/sae.c:sswu() contains comment:
 	 * "TODO: Make sure crypto_bignum_is_zero() is constant time"
 	 * Note: mbedtls_mpi_cmp_int() *is not* constant time */
 	return (mbedtls_mpi_cmp_int((const mbedtls_mpi *)a, 0) == 0);
+  #else
+	/* XXX: some places in src/common/sae.c require constant time safety */
+	/* Access n limbs, but more work needed if n limbs should not leak */
+	const mbedtls_mpi_uint *p = ((const mbedtls_mpi *)a)->MBEDTLS_PRIVATE(p);
+	size_t n = ((const mbedtls_mpi *)a)->MBEDTLS_PRIVATE(n);
+	unsigned int v = 0;
+	for (size_t i = 0; i < n; ++i)
+		v |= p[i];
+	return (v == 0);
+  #endif
 }
 
 int crypto_bignum_is_one(const struct crypto_bignum *a)
 {
+  #if 0
 	return (mbedtls_mpi_cmp_int((const mbedtls_mpi *)a, 1) == 0);
+  #else
+	/* XXX: some places in src/common/sae.c require constant time safety */
+	/* Access n limbs, but more work needed if n limbs should not leak */
+	const mbedtls_mpi_uint *p = ((const mbedtls_mpi *)a)->MBEDTLS_PRIVATE(p);
+	mbedtls_mpi_uint v = 0;
+	size_t n = ((const mbedtls_mpi *)a)->MBEDTLS_PRIVATE(n);
+	for (size_t i = 1; i < n; ++i)
+		v |= p[i];
+	return n ? ((p[0] == 1) & (v == 0)) : 0; /* n > 0 expected */
+  #endif
 }
 
 int crypto_bignum_is_odd(const struct crypto_bignum *a)
@@ -1644,9 +1666,11 @@ int crypto_bignum_legendre(const struct crypto_bignum *a,
 		 * to use constant time selection to avoid branches here. */
 		unsigned int mask;
 		res = -1;
-		mask = const_time_eq((mbedtls_mpi_cmp_int(&tmp, 1) == 0), 1);
+		mask = const_time_eq(
+		         crypto_bignum_is_one((struct crypto_bignum *)&tmp), 1);
 		res = const_time_select_int(mask, 1, res);
-		mask = const_time_eq((mbedtls_mpi_cmp_int(&tmp, 0) == 0), 1);
+		mask = const_time_eq(
+		         crypto_bignum_is_zero((struct crypto_bignum *)&tmp), 1);
 		res = const_time_select_int(mask, 0, res);
 	} else {
 		res = -2;
