@@ -2220,6 +2220,7 @@ struct wpabuf * crypto_ecdh_get_pubkey(struct crypto_ecdh *ecdh, int inc_y)
 	return NULL;
 }
 
+#if MBEDTLS_VERSION_NUMBER < 0x03040000 /* mbedtls 3.4.0 */
 #if defined(MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED)
 static int crypto_mbedtls_short_weierstrass_derive_y(mbedtls_ecp_group *grp,
                                                      mbedtls_mpi *bn,
@@ -2251,6 +2252,7 @@ static int crypto_mbedtls_short_weierstrass_derive_y(mbedtls_ecp_group *grp,
 	return ret;
 }
 #endif
+#endif
 
 struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 					const u8 *key, size_t len)
@@ -2272,6 +2274,9 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 		if (inc_y)
 			len >>= 1; /*(repurpose len to prime_len)*/
 		else {
+		  #if MBEDTLS_VERSION_NUMBER >= 0x03040000 /* mbedtls 3.4.0 */
+			buf[1] = 0x02; /*(assume 0x02 vs 0x03; same as derive y below)*/
+		  #else
 			/* mbedtls_ecp_point_read_binary() does not currently support
 			 * MBEDTLS_ECP_PF_COMPRESSED format (buf[1] = 0x02 or 0x03)
 			 * (returns MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE) */
@@ -2289,6 +2294,7 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 			if (ret != 0)
 				return NULL;
 			buf[0] += (u8)len;
+		  #endif
 		}
 
 		if (mbedtls_ecdh_read_public(&ecdh->ctx, buf, buf[0]+1))
@@ -2911,6 +2917,7 @@ struct crypto_ec_key * crypto_ec_key_set_priv(int group,
 #endif
 #endif
 
+#if MBEDTLS_VERSION_NUMBER < 0x03040000 /* mbedtls 3.4.0 */
 #include <mbedtls/error.h>
 #include <mbedtls/oid.h>
 static int crypto_mbedtls_pk_parse_subpubkey_compressed(mbedtls_pk_context *ctx, const u8 *der, size_t der_len)
@@ -3032,6 +3039,7 @@ static int crypto_mbedtls_pk_parse_subpubkey_compressed(mbedtls_pk_context *ctx,
 
     return mbedtls_ecp_check_pubkey( ecp_kp_grp, ecp_kp_Q );
 }
+#endif
 
 struct crypto_ec_key * crypto_ec_key_parse_pub(const u8 *der, size_t der_len)
 {
@@ -3043,6 +3051,7 @@ struct crypto_ec_key * crypto_ec_key_parse_pub(const u8 *der, size_t der_len)
 	int rc = mbedtls_pk_parse_public_key(ctx, der, der_len);
 	if (rc == 0)
 		return (struct crypto_ec_key *)ctx;
+  #if MBEDTLS_VERSION_NUMBER < 0x03040000 /* mbedtls 3.4.0 */
 	else if (rc == MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE) {
 		/* mbedtls mbedtls_ecp_point_read_binary()
 		 * does not handle point in COMPRESSED format; parse internally */
@@ -3050,6 +3059,7 @@ struct crypto_ec_key * crypto_ec_key_parse_pub(const u8 *der, size_t der_len)
 		if (rc == 0)
 			return (struct crypto_ec_key *)ctx;
 	}
+  #endif
 
 	mbedtls_pk_free(ctx);
 	os_free(ctx);
