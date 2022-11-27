@@ -21,9 +21,6 @@
  * - mbedtls does not currently provide way to set an attribute in a CSR
  *     https://github.com/Mbed-TLS/mbedtls/issues/4886
  *   so tests/hwsim dpp_enterprise tests fail
- * - DPP2 not supported
- *   PKCS#7 parsing is not supported in mbedtls
- *   See crypto_mbedtls.c:crypto_pkcs7_get_certificates() comments
  * - DPP3 not supported
  *   hpke_base_seal() and hpke_base_seal() not implemented in crypto_mbedtls.c
  *
