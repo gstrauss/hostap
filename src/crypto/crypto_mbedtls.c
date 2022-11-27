@@ -197,6 +197,12 @@
 
 #if defined(CONFIG_DPP2) /* CONFIG_DPP2=y */
 #define CRYPTO_MBEDTLS_CRYPTO_PKCS7
+#if MBEDTLS_VERSION_NUMBER < 0x03030000 /* mbedtls 3.3.0 */
+#error "mbedtls before v3.3.0 does not support PKCS7 (needed by CONFIG_DPP2=y)"
+#endif
+#ifndef MBEDTLS_PKCS7_C
+#error "mbedtls PKCS7 support (needed by CONFIG_DPP2=y) not enabled in mbedtls"
+#endif
 #endif /* crypto_pkcs7_*() */
 
 #if defined(EAP_SIM) || defined(EAP_SIM_DYNAMIC) || defined(EAP_SERVER_SIM) \
@@ -3845,19 +3851,12 @@ struct wpabuf * crypto_csr_sign(struct crypto_csr *csr,
 
 #ifdef CRYPTO_MBEDTLS_CRYPTO_PKCS7
 
-#if 0
-#include <mbedtls/pkcs7.h> /* PKCS7 is not currently supported in mbedtls */
+#include <mbedtls/pkcs7.h>
 #include <mbedtls/pem.h>
-#endif
 
 struct wpabuf * crypto_pkcs7_get_certificates(const struct wpabuf *pkcs7)
 {
-	/* PKCS7 is not currently supported in mbedtls */
-	return NULL;
-
-#if 0
-	/* https://github.com/naynajain/mbedtls-1 branch: development-pkcs7
-	 * (??? potential future contribution to mbedtls ???) */
+	/* PKCS7 support added to mbedtls in 3.3.0 */
 
 	/* Note: PKCS7 signature *is not* verified by this function.
 	 * The function interface does not provide for passing a certificate */
@@ -3898,10 +3897,10 @@ struct wpabuf * crypto_pkcs7_get_certificates(const struct wpabuf *pkcs7)
 			            PEM_BEGIN_CRT, PEM_END_CRT,
 			            certs[i].raw.p, certs[i].raw.len,
 			            wpabuf_mhead(buf, 0), wpabuf_tailroom(buf),
-			            &olen));
+			            &olen);
 			if (ret == 0)
 				wpabuf_put(buf, olen);
-			} else {
+			else {
 				if (ret == MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL)
 					ret = wpabuf_resize(
 					        &buf,olen-wpabuf_tailroom(buf));
@@ -3918,7 +3917,6 @@ struct wpabuf * crypto_pkcs7_get_certificates(const struct wpabuf *pkcs7)
 
 	mbedtls_pkcs7_free(&mpkcs7);
 	return buf;
-#endif
 }
 
 #endif /* CRYPTO_MBEDTLS_CRYPTO_PKCS7 */
