@@ -941,7 +941,7 @@ int des_encrypt(const u8 *clear, const u8 *key, u8 *cypher)
 int pbkdf2_sha1(const char *passphrase, const u8 *ssid, size_t ssid_len,
                 int iterations, u8 *buf, size_t buflen)
 {
-  #if MBEDTLS_VERSION_NUMBER >= 0x03020200 /* mbedtls 3.2.2 */
+  #if MBEDTLS_VERSION_NUMBER >= 0x03030000 /* mbedtls 3.3.0 */
 	return mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA1,
 			(const u8 *)passphrase, os_strlen(passphrase),
 			ssid, ssid_len, iterations, 32, buf) ? -1 : 0;
