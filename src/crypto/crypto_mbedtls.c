@@ -3541,7 +3541,7 @@ void crypto_ec_key_debug_print(const struct crypto_ec_key *key,
 			       const char *title)
 {
 	/* TBD: what info is desirable here and in what human readable format?*/
-	/*(crypto_openssl.c prints a human-readably public key and attributes)*/
+	/*(crypto_openssl.c prints a human-readable public key and attributes)*/
   #if 0
 	struct mbedtls_pk_debug_item debug_item;
 	if (mbedtls_pk_debug((const mbedtls_pk_context *)key, &debug_item))
