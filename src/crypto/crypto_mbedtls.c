@@ -2299,25 +2299,19 @@ struct crypto_ecdh * crypto_ecdh_init2(int group,
 struct wpabuf * crypto_ecdh_get_pubkey(struct crypto_ecdh *ecdh, int inc_y)
 {
 	mbedtls_ecp_group *grp = &ecdh->grp;
-	size_t len = CRYPTO_EC_plen(grp);
-  #ifdef MBEDTLS_ECP_MONTGOMERY_ENABLED
-	/* len */
-  #endif
-  #ifdef MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED
-	if (mbedtls_ecp_get_type(grp) == MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS)
-		len = inc_y ? len*2+1 : len+1;
-  #endif
-	struct wpabuf *buf = wpabuf_alloc(len);
-	if (buf == NULL)
-		return NULL;
+	size_t len;
+	u8 buf[256];
 	inc_y = inc_y ? MBEDTLS_ECP_PF_UNCOMPRESSED : MBEDTLS_ECP_PF_COMPRESSED;
 	if (mbedtls_ecp_point_write_binary(grp, &ecdh->Q, inc_y, &len,
-	                                   wpabuf_mhead_u8(buf), len) == 0) {
-		wpabuf_put(buf, len);
-		return buf;
+	                                   buf, sizeof(buf)) == 0) {
+	  #ifdef MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED
+		if (mbedtls_ecp_get_type(grp) == MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS)
+			/* omit leading tag byte in return value */
+			return wpabuf_alloc_copy(buf+1, len-1);
+	  #endif
+		return wpabuf_alloc_copy(buf, len);
 	}
 
-	wpabuf_free(buf);
 	return NULL;
 }
 
@@ -2365,46 +2359,32 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 	if (mbedtls_ecp_get_type(grp) == MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS) {
 		/* add header for mbedtls_ecdh_read_public() */
 		u8 buf[256];
-		if (sizeof(buf)-1 < len)
+		if (sizeof(buf)-2 < len)
 			return NULL;
-		buf[0] = (u8)(len);
-		os_memcpy(buf+1, key, len);
-
-		if (inc_y) {
-			if (!(len & 1)) { /*(dpp code/tests does not include tag?!?)*/
-				if (sizeof(buf)-2 < len)
-					return NULL;
-				buf[0] = (u8)(1+len);
-				buf[1] = 0x04;
-				os_memcpy(buf+2, key, len);
-			}
+		buf[0] = (u8)(1+len);
+		buf[1] = 0x04;
+		os_memcpy(buf+2, key, len);
+		if (inc_y)
 			len >>= 1; /*(repurpose len to prime_len)*/
-		}
-		else if (key[0] == 0x02 || key[0] == 0x03) { /* (inc_y == 0) */
-			--len; /*(repurpose len to prime_len)*/
-
+		else {
 			/* mbedtls_ecp_point_read_binary() does not currently support
 			 * MBEDTLS_ECP_PF_COMPRESSED format (buf[1] = 0x02 or 0x03)
 			 * (returns MBEDTLS_ERR_ECP_FEATURE_UNAVAILABLE) */
 
 			/* derive y, amend buf[] with y for UNCOMPRESSED format */
-			if (sizeof(buf)-2 < len*2 || len == 0)
+			if (sizeof(buf)-2 < len*2)
 				return NULL;
-			buf[0] = (u8)(1+len*2);
-			buf[1] = 0x04;
+
 			mbedtls_mpi bn;
 			mbedtls_mpi_init(&bn);
-			int ret = mbedtls_mpi_read_binary(&bn, key+1, len)
-			       || crypto_mbedtls_short_weierstrass_derive_y(grp, &bn,
-			                                                    key[0] & 1)
+			int ret = mbedtls_mpi_read_binary(&bn, key, len)
+			       || crypto_mbedtls_short_weierstrass_derive_y(grp, &bn, 0)
 			       || mbedtls_mpi_write_binary(&bn, buf+2+len, len);
 			mbedtls_mpi_free(&bn);
 			if (ret != 0)
 				return NULL;
+			buf[0] += (u8)len;
 		}
-
-		if (key[0] == 0) /*(repurpose len to prime_len)*/
-			len = CRYPTO_EC_plen(grp);
 
 		if (mbedtls_ecdh_read_public(&ecdh->ctx, buf, buf[0]+1))
 			return NULL;
