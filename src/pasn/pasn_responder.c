@@ -485,7 +485,7 @@ int handle_auth_pasn_resp(struct pasn_data *pasn, const u8 *own_addr,
 			  const u8 *peer_addr,
 			  struct rsn_pmksa_cache_entry *pmksa, u16 status)
 {
-	struct wpabuf *buf, *pubkey = NULL, *wrapped_data_buf = NULL;
+	struct wpabuf *buf, *wrapped_data_buf = NULL;
 	struct wpabuf *rsn_buf = NULL;
 	u8 mic[WPA_PASN_MAX_MIC_LEN];
 	u8 mic_len;
@@ -535,26 +535,16 @@ int handle_auth_pasn_resp(struct pasn_data *pasn, const u8 *own_addr,
 	else
 		pasn->wrapped_data_format = WPA_PASN_WRAPPED_DATA_NO;
 
-	/* Get public key */
-	pubkey = crypto_ecdh_get_pubkey(pasn->ecdh, 0);
-	pubkey = wpabuf_zeropad(pubkey,
-				crypto_ecdh_prime_len(pasn->ecdh));
-	if (!pubkey) {
-		wpa_printf(MSG_DEBUG, "PASN: Failed to get pubkey");
+	if (!wpa_pasn_add_parameter_ie(buf, pasn->group,
+				       pasn->wrapped_data_format,
+				       pasn->ecdh, true, NULL, 0))
 		goto fail;
-	}
-
-	wpa_pasn_add_parameter_ie(buf, pasn->group,
-				  pasn->wrapped_data_format,
-				  pubkey, true, NULL, 0);
 
 	if (wpa_pasn_add_wrapped_data(buf, wrapped_data_buf) < 0)
 		goto fail;
 
 	wpabuf_free(wrapped_data_buf);
 	wrapped_data_buf = NULL;
-	wpabuf_free(pubkey);
-	pubkey = NULL;
 
 	/* Add RSNXE if needed */
 	rsnxe_ie = pasn->rsnxe_ie;
@@ -647,7 +637,6 @@ done:
 	return ret;
 fail:
 	wpabuf_free(wrapped_data_buf);
-	wpabuf_free(pubkey);
 	wpabuf_free(rsn_buf);
 	wpabuf_free(buf);
 	return -1;

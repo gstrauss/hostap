@@ -4002,10 +4002,10 @@ int wpa_pasn_add_rsne(struct wpabuf *buf, const u8 *pmkid, int akmp, int cipher)
  * @after: If comeback is set, defined the comeback time in seconds. -1 to not
  *	include the Comeback After field (frames from non-AP STA).
  */
-void wpa_pasn_add_parameter_ie(struct wpabuf *buf, u16 pasn_group,
-			       u8 wrapped_data_format,
-			       const struct wpabuf *pubkey, bool compressed,
-			       const struct wpabuf *comeback, int after)
+int wpa_pasn_add_parameter_ie(struct wpabuf *buf, u16 pasn_group,
+			      u8 wrapped_data_format,
+			      struct crypto_ecdh *ecdh, bool compressed,
+			      const struct wpabuf *comeback, int after)
 {
 	struct pasn_parameter_ie *params;
 
@@ -4037,10 +4037,19 @@ void wpa_pasn_add_parameter_ie(struct wpabuf *buf, u16 pasn_group,
 		wpabuf_put_buf(buf, comeback);
 	}
 
-	if (pubkey) {
+	{
 		wpa_printf(MSG_DEBUG,
 			   "PASN: Adding public key and group ID %u",
 			   pasn_group);
+
+		/* Get public key */
+		int inc_y = !compressed;
+		const struct wpabuf *pubkey = crypto_ecdh_get_pubkey(ecdh, inc_y);
+		pubkey = wpabuf_zeropad(pubkey, crypto_ecdh_prime_len(ecdh));
+		if (!pubkey) {
+			wpa_printf(MSG_DEBUG, "PASN: Failed to get pubkey");
+			return 0;
+		}
 
 		/*
 		 * 2 octets for the finite cyclic group + 2 octets public key
@@ -4061,7 +4070,10 @@ void wpa_pasn_add_parameter_ie(struct wpabuf *buf, u16 pasn_group,
 			      WPA_PASN_PUBKEY_UNCOMPRESSED);
 
 		wpabuf_put_buf(buf, pubkey);
+		wpabuf_free(pubkey);
 	}
+
+	return 1;
 }
 
 /*

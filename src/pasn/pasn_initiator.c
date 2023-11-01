@@ -581,7 +581,7 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 					      const struct wpabuf *comeback,
 					      bool verify)
 {
-	struct wpabuf *buf, *pubkey = NULL, *wrapped_data_buf = NULL;
+	struct wpabuf *buf, *wrapped_data_buf = NULL;
 	const u8 *pmkid;
 	u8 wrapped_data;
 	int ret;
@@ -594,14 +594,6 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 	buf = wpabuf_alloc(1500);
 	if (!buf)
 		goto fail;
-
-	/* Get public key */
-	pubkey = crypto_ecdh_get_pubkey(pasn->ecdh, 0);
-	pubkey = wpabuf_zeropad(pubkey, crypto_ecdh_prime_len(pasn->ecdh));
-	if (!pubkey) {
-		wpa_printf(MSG_DEBUG, "PASN: Failed to get pubkey");
-		goto fail;
-	}
 
 	wrapped_data = wpas_pasn_get_wrapped_data_format(pasn);
 
@@ -640,8 +632,9 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 	if (!wrapped_data_buf)
 		wrapped_data = WPA_PASN_WRAPPED_DATA_NO;
 
-	wpa_pasn_add_parameter_ie(buf, pasn->group, wrapped_data,
-				  pubkey, true, comeback, -1);
+	if (!wpa_pasn_add_parameter_ie(buf, pasn->group, wrapped_data,
+				       pasn->ecdh, true, comeback, -1))
+		goto fail;
 
 	if (wpa_pasn_add_wrapped_data(buf, wrapped_data_buf) < 0)
 		goto fail;
@@ -665,14 +658,12 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 	pasn->trans_seq++;
 
 	wpabuf_free(wrapped_data_buf);
-	wpabuf_free(pubkey);
 
 	wpa_printf(MSG_DEBUG, "PASN: Frame 1: Success");
 	return buf;
 fail:
 	pasn->status = WLAN_STATUS_UNSPECIFIED_FAILURE;
 	wpabuf_free(wrapped_data_buf);
-	wpabuf_free(pubkey);
 	wpabuf_free(buf);
 	return NULL;
 }
