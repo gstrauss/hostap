@@ -2141,24 +2141,22 @@ fail:
 struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 					const u8 *key, size_t len)
 {
+	u8 buf[256];
+	if (sizeof(buf)-1 < len)
+		return NULL;
+	buf[0] = inc_y ? ECC_POINT_UNCOMP : ECC_POINT_COMP_EVEN;
+	os_memcpy(buf + 1, key, len);
+	return crypto_ecdh_set_peerkey_ext(ecdh, buf, 1 + len);
+}
+
+
+struct wpabuf * crypto_ecdh_set_peerkey_ext(struct crypto_ecdh *ecdh,
+					    const u8 *key, size_t len)
+{
 	int ret;
-	struct wpabuf *pubkey = NULL;
 	struct wpabuf *secret = NULL;
 	word32 key_len = ecdh->ec->key->dp->size;
 	ecc_point *point = NULL;
-	size_t need_key_len = inc_y ? 2 * key_len : key_len;
-
-	if (len < need_key_len) {
-		LOG_WOLF_ERROR("key len too small");
-		goto fail;
-	}
-	pubkey = wpabuf_alloc(1 + 2 * key_len);
-	if (!pubkey) {
-		LOG_WOLF_ERROR_FUNC_NULL(wpabuf_alloc);
-		goto fail;
-	}
-	wpabuf_put_u8(pubkey, inc_y ? ECC_POINT_UNCOMP : ECC_POINT_COMP_EVEN);
-	wpabuf_put_data(pubkey, key, need_key_len);
 
 	point = wc_ecc_new_point();
 	if (!point) {
@@ -2166,8 +2164,8 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 		goto fail;
 	}
 
-	ret = wc_ecc_import_point_der(wpabuf_mhead(pubkey), 1 + 2 * key_len,
-				      ecdh->ec->key->idx, point);
+	ret = wc_ecc_import_point_der(key, len,
+				      ecdh->ec->key.idx, point);
 	if (ret != MP_OKAY) {
 		LOG_WOLF_ERROR_FUNC(wc_ecc_import_point_der, ret);
 		goto fail;
@@ -2188,7 +2186,6 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 
 done:
 	wc_ecc_del_point(point);
-	wpabuf_free(pubkey);
 	return secret;
 fail:
 	wpabuf_free(secret);

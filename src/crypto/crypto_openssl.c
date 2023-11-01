@@ -2648,32 +2648,33 @@ fail:
 struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 					const u8 *key, size_t len)
 {
+	/* Encode using SECG SEC 1, Sec. 2.3.4 format */
+	u8 buf[256];
+	if (sizeof(buf)-1 < len)
+		return NULL;
+	buf[0] = inc_y ? 0x04 : 0x02;
+	os_memcpy(buf + 1, key, len);
+	return crypto_ecdh_set_peerkey_ext(ecdh, buf, 1 + len);
+}
+
+
+struct wpabuf * crypto_ecdh_set_peerkey_ext(struct crypto_ecdh *ecdh,
+					    const u8 *key, size_t len)
+{
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 	EVP_PKEY *peerkey = EVP_PKEY_new();
 	EVP_PKEY_CTX *ctx;
 	size_t res_len;
 	struct wpabuf *res = NULL;
-	u8 *peer;
-
-	/* Encode using SECG SEC 1, Sec. 2.3.4 format */
-	peer = os_malloc(1 + len);
-	if (!peer) {
-		EVP_PKEY_free(peerkey);
-		return NULL;
-	}
-	peer[0] = inc_y ? 0x04 : 0x02;
-	os_memcpy(peer + 1, key, len);
 
 	if (!peerkey ||
 	    EVP_PKEY_copy_parameters(peerkey, ecdh->pkey) != 1 ||
-	    EVP_PKEY_set1_encoded_public_key(peerkey, peer, 1 + len) != 1) {
+	    EVP_PKEY_set1_encoded_public_key(peerkey, key, len) != 1) {
 		wpa_printf(MSG_INFO, "OpenSSL: EVP_PKEY_set1_encoded_public_key failed: %s",
 			   ERR_error_string(ERR_get_error(), NULL));
 		EVP_PKEY_free(peerkey);
-		os_free(peer);
 		return NULL;
 	}
-	os_free(peer);
 
 	ctx = EVP_PKEY_CTX_new(ecdh->pkey, NULL);
 	if (!ctx ||
@@ -2702,13 +2703,13 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 	EC_POINT *pub;
 	EC_KEY *eckey = NULL;
 
-	x = BN_bin2bn(key, inc_y ? len / 2 : len, NULL);
+	x = BN_bin2bn(key + 1, key[0] == 0x4 ? len / 2 : len - 1, NULL);
 	pub = EC_POINT_new(ecdh->ec->group);
 	if (!x || !pub)
 		goto fail;
 
-	if (inc_y) {
-		y = BN_bin2bn(key + len / 2, len / 2, NULL);
+	if (key[0] == 0x4) {
+		y = BN_bin2bn(key + 1 + len / 2, len / 2, NULL);
 		if (!y)
 			goto fail;
 		if (!EC_POINT_set_affine_coordinates(ecdh->ec->group, pub,
@@ -2719,7 +2720,7 @@ struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 			goto fail;
 		}
 	} else if (!EC_POINT_set_compressed_coordinates(ecdh->ec->group,
-							pub, x, 0,
+							pub, x, key[0] & 1,
 							ecdh->ec->bnctx)) {
 		wpa_printf(MSG_ERROR,
 			   "OpenSSL: EC_POINT_set_compressed_coordinates failed: %s",
