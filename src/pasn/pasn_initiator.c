@@ -1131,7 +1131,7 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 	u8 mic[WPA_PASN_MAX_MIC_LEN], out_mic[WPA_PASN_MAX_MIC_LEN];
 	u8 mic_len;
 	u16 status;
-	int ret, inc_y;
+	int ret;
 	u8 *copy = NULL;
 	size_t mic_offset, copy_len;
 
@@ -1254,21 +1254,9 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 		goto fail;
 	}
 
-	if (pasn_params->pubkey[0] == WPA_PASN_PUBKEY_UNCOMPRESSED) {
-		inc_y = 1;
-	} else if (pasn_params->pubkey[0] == WPA_PASN_PUBKEY_COMPRESSED_0 ||
-		   pasn_params->pubkey[0] == WPA_PASN_PUBKEY_COMPRESSED_1) {
-		inc_y = 0;
-	} else {
-		wpa_printf(MSG_DEBUG,
-			   "PASN: Invalid first octet in pubkey=0x%x",
-			   pasn_params->pubkey[0]);
-		goto fail;
-	}
-
-	secret = crypto_ecdh_set_peerkey(pasn->ecdh, inc_y,
-					 pasn_params->pubkey + 1,
-					 pasn_params->pubkey_len - 1);
+	secret = crypto_ecdh_set_peerkey_ext(pasn->ecdh,
+					     pasn_params->pubkey,
+					     pasn_params->pubkey_len);
 
 	if (!secret) {
 		wpa_printf(MSG_DEBUG, "PASN: Failed to derive shared secret");
