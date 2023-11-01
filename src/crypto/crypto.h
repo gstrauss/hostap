@@ -975,7 +975,7 @@ struct crypto_ecdh * crypto_ecdh_init2(int group,
  * @ecdh: ECDH context from crypto_ecdh_init() or crypto_ecdh_init2()
  * @inc_y: Whether public key should include y coordinate (explicit form)
  * or not (compressed form)
- * Returns: Binary data f the public key or %NULL on failure
+ * Returns: Binary data of the public key without tag byte, or %NULL on failure
  */
 struct wpabuf * crypto_ecdh_get_pubkey(struct crypto_ecdh *ecdh, int inc_y);
 
@@ -984,12 +984,25 @@ struct wpabuf * crypto_ecdh_get_pubkey(struct crypto_ecdh *ecdh, int inc_y);
  * @ecdh: ECDH context from crypto_ecdh_init() or crypto_ecdh_init2()
  * @inc_y: Whether peer's public key includes y coordinate (explicit form)
  * or not (compressed form)
- * @key: Binary data of the peer's public key
+ * @key: Binary data (without leading tag byte) of the peer's public key
  * @len: Length of the @key buffer
  * Returns: Binary data with the EDCH secret or %NULL on failure
  */
 struct wpabuf * crypto_ecdh_set_peerkey(struct crypto_ecdh *ecdh, int inc_y,
 					const u8 *key, size_t len);
+
+/**
+ * crypto_ecdh_set_peerkey_ext - Compute ECDH secret
+ * @ecdh: ECDH context from crypto_ecdh_init() or crypto_ecdh_init2()
+ * @key: Binary data of the peer's public key (including tag byte)
+ *       SECG SEC 1, Sec. 2.3.4 format
+ *       https://www.secg.org/sec1-v2.pdf
+ *       2.3.4 Octet-String-to-Elliptic-Curve-Point Conversion
+ * @len: Length of the @key buffer
+ * Returns: Binary data with the EDCH secret or %NULL on failure
+ */
+struct wpabuf * crypto_ecdh_set_peerkey_ext(struct crypto_ecdh *ecdh,
+					    const u8 *key, size_t len);
 
 /**
  * crypto_ecdh_deinit - Free ECDH context
