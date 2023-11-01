@@ -520,15 +520,15 @@ int dpp_ecdh(struct crypto_ec_key *own, struct crypto_ec_key *peer,
 		return -1;
 	}
 
-	peer_pub = crypto_ec_key_get_pubkey_point(peer, 0);
+	peer_pub = crypto_ec_key_get_pubkey_point(peer, 1);
 	if (!peer_pub) {
 		wpa_printf(MSG_ERROR,
 			   "DPP: crypto_ec_key_get_pubkey_point() failed");
 		goto fail;
 	}
 
-	secret_buf = crypto_ecdh_set_peerkey(ecdh, 1, wpabuf_head(peer_pub),
-					     wpabuf_len(peer_pub));
+	secret_buf = crypto_ecdh_set_peerkey_ext(ecdh, wpabuf_head(peer_pub),
+					         wpabuf_len(peer_pub));
 	if (!secret_buf) {
 		wpa_printf(MSG_ERROR, "DPP: crypto_ecdh_set_peerkey() failed");
 		goto fail;
